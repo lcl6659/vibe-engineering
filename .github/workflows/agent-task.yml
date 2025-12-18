@@ -4,6 +4,11 @@ on:
   issues:
     types: [opened, labeled]
 
+# 🔑 必须：否则 create-pull-request 一定 403
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   run-agent:
     if: >-
@@ -34,7 +39,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -e
-      
+
+          # ✅ heredoc 必须顶格
           cat > CODEX_PROMPT.txt <<'PROMPT'
             Read ISSUE.md as a contract.
             Follow AGENT_PROTOCOL.md.
@@ -42,13 +48,21 @@ jobs:
             Execute task.
             Run tests.
             PROMPT
-      
+
           if command -v codex >/dev/null 2>&1; then
             codex run CODEX_PROMPT.txt
           elif command -v codex-cli >/dev/null 2>&1; then
             codex-cli run CODEX_PROMPT.txt
           else
             python -m codex run CODEX_PROMPT.txt
+          fi
+
+      # 🚨 强烈推荐：防止“假 PR”
+      - name: Ensure code changes exist
+        run: |
+          if git diff --quiet; then
+            echo "❌ Agent produced no code changes"
+            exit 1
           fi
 
       - name: Create Pull Request

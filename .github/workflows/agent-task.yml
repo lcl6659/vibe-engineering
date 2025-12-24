@@ -18,6 +18,11 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -53,17 +58,21 @@ jobs:
           echo "Issue content saved to ISSUE.md"
 
       - name: Run Codex
-        uses: openai/codex-action@main
-        id: codex
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt: >-
-            Read ISSUE.md as a contract.
-            Follow AGENT_PROTOCOL.md.
-            Generate execution plan.
-            Execute task.
-            Run tests.
-          sandbox: workspace-write
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -e
+
+          cat > CODEX_PROMPT.txt <<'PROMPT'
+          Read ISSUE.md as a contract.
+          Follow AGENT_PROTOCOL.md.
+          Generate execution plan.
+          Execute task.
+          Run tests.
+          PROMPT
+
+          # `-` 表示从 stdin 读取 prompt
+          npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt
 
       - name: Debug git status
         run: |

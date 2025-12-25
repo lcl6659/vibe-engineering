@@ -152,8 +152,9 @@ jobs:
           [model_providers.openrouter]
           name = "OpenRouter"
           base_url = "$API_BASE"
-          wire_api = "responses"
-          requires_openai_auth = true
+          # OpenRouter 对 OpenAI 的 Chat Completions 兼容更稳定；避免 Responses/tool-calling 协议不一致导致卡住
+          wire_api = "chat_completions"
+          requires_openai_auth = false
           env_key = "OPENROUTER_API_KEY"
           EOF
             
@@ -230,39 +231,15 @@ jobs:
           PLAN
 
           cat > CODEX_PROMPT.txt <<'PROMPT'
-          You are an automated coding agent following Vibe Engineering principles.
+          Read ISSUE.md (contract) and AGENT_PROTOCOL.md (rules). Then implement ISSUE.md.
 
-          ## Your Task
-          1. Read ISSUE.md (the contract) and AGENT_PROTOCOL.md (the rules)
-          2. Create/update EXEC_PLAN.md with your execution plan
-          3. Implement the code changes
-          4. Write or update tests (tests are for both humans and future AI agents)
-          5. Run tests, fix failures, iterate until tests pass
-          6. Update documentation (documentation is for both humans and future AI agents)
+          IMPORTANT:
+          - Do NOT output or discuss "JSON tool calls" or "functions.shell" formatting.
+          - Just execute: read/write files in the repo and run commands as needed.
+          - Update EXEC_PLAN.md with: plan (exact files), progress checkboxes, and decisions.
+          - Produce real code changes (at least one file changed), then run tests if available.
 
-          ## Watchdog Reminders (Keep these in mind)
-          - Your goal: Implement requirements in ISSUE.md exactly as specified
-          - Do NOT deviate from the requirements
-          - Do NOT refactor unrelated code
-          - Focus on: correctness, tests, documentation
-
-          ## Vibe Engineering Principles
-          - Code is cheap, trust is expensive
-          - Spend time on tests and verification, not just writing code
-          - Write code that both humans and AI agents can understand
-          - Document your decisions and assumptions
-          - Run tests frequently and fix failures immediately
-
-          ## Execution Flow
-          1. Read ISSUE.md and AGENT_PROTOCOL.md
-          2. Update EXEC_PLAN.md with your plan (list exact files to create/modify)
-          3. Implement code changes
-          4. Write/update tests
-          5. Run tests → Fix failures → Run tests again (iterate until passing)
-          6. Update documentation
-          7. Verify all requirements from ISSUE.md are met
-
-          Start by reading the files, then update EXEC_PLAN.md, then implement.
+          Focus on minimal, reviewable changes. No unrelated refactors.
           PROMPT
 
           # `-` 表示从 stdin 读取 prompt

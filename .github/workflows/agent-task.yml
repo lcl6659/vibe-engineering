@@ -132,14 +132,31 @@ jobs:
             API_KEY="$OPENROUTER_API_KEY"
             API_BASE="https://openrouter.ai/api/v1"
             # OpenRouter 默认模型（如果未指定）
-            DEFAULT_MODEL="${CODEX_MODEL:-openai/gpt-4o}"
-            # OpenRouter 需要在 header 中设置 HTTP-Referer 和 X-Title
-            # 尝试多种可能的环境变量名称
-            export OPENAI_API_BASE="$API_BASE"
-            export OPENAI_BASE_URL="$API_BASE"
-            export API_BASE_URL="$API_BASE"
-            export OPENROUTER_API_KEY="$OPENROUTER_API_KEY"
-            # OpenRouter 推荐的 headers
+            DEFAULT_MODEL="openai/gpt-4o"
+            # 使用指定的模型或默认模型
+            MODEL="${CODEX_MODEL:-$DEFAULT_MODEL}"
+            
+            # 创建 Codex 配置文件目录
+            mkdir -p ~/.codex
+            
+            # 创建 config.toml 配置文件（Codex 工具支持这种方式）
+            cat > ~/.codex/config.toml <<EOF
+          model_provider = "openrouter"
+          model = "$MODEL"
+          model_reasoning_effort = "none"
+          disable_response_storage = true
+          preferred_auth_method = "apikey"
+
+          [model_providers.openrouter]
+          name = "OpenRouter"
+          base_url = "$API_BASE"
+          wire_api = "responses"
+          requires_openai_auth = true
+          env_key = "OPENROUTER_API_KEY"
+          EOF
+            
+            # 设置环境变量
+            export OPENROUTER_API_KEY="$API_KEY"
             export HTTP_REFERER="https://github.com/${{ github.repository }}"
             export X_TITLE="GitHub Actions Agent"
           elif [ -n "$OPENAI_API_KEY" ]; then
@@ -147,51 +164,41 @@ jobs:
             API_KEY="$OPENAI_API_KEY"
             API_BASE="https://api.openai.com/v1"
             # OpenAI 默认模型（如果未指定）
-            DEFAULT_MODEL="${CODEX_MODEL:-gpt-4o}"
+            DEFAULT_MODEL="gpt-4o"
+            # 使用指定的模型或默认模型
+            MODEL="${CODEX_MODEL:-$DEFAULT_MODEL}"
+            
+            # 创建 Codex 配置文件目录
+            mkdir -p ~/.codex
+            
+            # 创建 config.toml 配置文件（使用 OpenAI）
+            cat > ~/.codex/config.toml <<EOF
+          model_provider = "openai"
+          model = "$MODEL"
+          model_reasoning_effort = "none"
+          disable_response_storage = true
+          preferred_auth_method = "apikey"
+
+          [model_providers.openai]
+          name = "OpenAI"
+          base_url = "$API_BASE"
+          env_key = "OPENAI_API_KEY"
+          EOF
+            
+            # 设置环境变量
+            export OPENAI_API_KEY="$API_KEY"
           else
             echo "ERROR: Neither OPENAI_API_KEY nor OPENROUTER_API_KEY is set!"
             exit 1
           fi
-
-          # 使用指定的模型或默认模型
-          MODEL="${CODEX_MODEL:-$DEFAULT_MODEL}"
 
           # 调试：检查 API 密钥和模型配置
           echo "API_KEY is set (length: ${#API_KEY} characters)"
           echo "API_KEY prefix: ${API_KEY:0:10}..."
           echo "API_BASE: $API_BASE"
           echo "MODEL: $MODEL"
-
-          # 显式导出环境变量，确保子进程可以访问
-          export OPENAI_API_KEY="$API_KEY"
-          export OPENAI_API_BASE="$API_BASE"
-          export OPENAI_BASE_URL="$API_BASE"
-          export API_BASE_URL="$API_BASE"
-          export OPENAI_MODEL="$MODEL"
-
-          # 尝试创建配置文件（如果工具支持）
-          # 某些工具可能需要配置文件而不是环境变量
-          cat > .codexrc.json <<EOF
-          {
-            "apiKey": "$API_KEY",
-            "apiBase": "$API_BASE",
-            "baseURL": "$API_BASE",
-            "model": "$MODEL"
-          }
-          EOF
-          
-          # 尝试创建 .env 文件（某些工具可能读取这个）
-          if [ -n "$OPENROUTER_API_KEY" ]; then
-            cat > .env <<EOF
-          OPENAI_API_KEY=$API_KEY
-          OPENAI_API_BASE=$API_BASE
-          OPENAI_BASE_URL=$API_BASE
-          API_BASE_URL=$API_BASE
-          OPENAI_MODEL=$MODEL
-          HTTP_REFERER=https://github.com/${{ github.repository }}
-          X_TITLE=GitHub Actions Agent
-          EOF
-          fi
+          echo "Config file created at: ~/.codex/config.toml"
+          cat ~/.codex/config.toml
 
           cat > CODEX_PROMPT.txt <<'PROMPT'
           Read ISSUE.md as a contract.
@@ -202,42 +209,17 @@ jobs:
           PROMPT
 
           # `-` 表示从 stdin 读取 prompt
-          # 使用 env 命令确保环境变量被正确传递
-          # 设置所有可能的 API base URL 环境变量名称（工具可能使用不同的名称）
-          # 尝试通过 --model 参数传递模型（如果工具支持）
+          # Codex 工具会从 ~/.codex/config.toml 读取配置
+          # 只需要确保相应的 API key 环境变量被设置
           if [ -n "$OPENROUTER_API_KEY" ]; then
-            # 使用 OpenRouter，设置所有可能的环境变量
-            env OPENAI_API_KEY="$API_KEY" \
-                OPENAI_API_BASE="$API_BASE" \
-                OPENAI_BASE_URL="$API_BASE" \
-                API_BASE_URL="$API_BASE" \
-                OPENAI_MODEL="$MODEL" \
-                OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
+            # 使用 OpenRouter，设置必要的环境变量
+            env OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
                 HTTP_REFERER="https://github.com/${{ github.repository }}" \
                 X_TITLE="GitHub Actions Agent" \
-                CODEX_API_KEY="$API_KEY" \
-                npx -y @openai/codex exec --full-auto --model "$MODEL" -C . - < CODEX_PROMPT.txt || \
-            env OPENAI_API_KEY="$API_KEY" \
-                OPENAI_API_BASE="$API_BASE" \
-                OPENAI_BASE_URL="$API_BASE" \
-                API_BASE_URL="$API_BASE" \
-                OPENAI_MODEL="$MODEL" \
-                OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
-                HTTP_REFERER="https://github.com/${{ github.repository }}" \
-                X_TITLE="GitHub Actions Agent" \
-                CODEX_API_KEY="$API_KEY" \
                 npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt
           else
             # 使用 OpenAI
             env OPENAI_API_KEY="$API_KEY" \
-                OPENAI_API_BASE="$API_BASE" \
-                OPENAI_MODEL="$MODEL" \
-                CODEX_API_KEY="$API_KEY" \
-                npx -y @openai/codex exec --full-auto --model "$MODEL" -C . - < CODEX_PROMPT.txt || \
-            env OPENAI_API_KEY="$API_KEY" \
-                OPENAI_API_BASE="$API_BASE" \
-                OPENAI_MODEL="$MODEL" \
-                CODEX_API_KEY="$API_KEY" \
                 npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt
           fi
 

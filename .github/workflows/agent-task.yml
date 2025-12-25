@@ -134,8 +134,14 @@ jobs:
             # OpenRouter 默认模型（如果未指定）
             DEFAULT_MODEL="${CODEX_MODEL:-openai/gpt-4o}"
             # OpenRouter 需要在 header 中设置 HTTP-Referer 和 X-Title
+            # 尝试多种可能的环境变量名称
             export OPENAI_API_BASE="$API_BASE"
+            export OPENAI_BASE_URL="$API_BASE"
+            export API_BASE_URL="$API_BASE"
             export OPENROUTER_API_KEY="$OPENROUTER_API_KEY"
+            # OpenRouter 推荐的 headers
+            export HTTP_REFERER="https://github.com/${{ github.repository }}"
+            export X_TITLE="GitHub Actions Agent"
           elif [ -n "$OPENAI_API_KEY" ]; then
             echo "Using OpenAI API"
             API_KEY="$OPENAI_API_KEY"
@@ -159,6 +165,8 @@ jobs:
           # 显式导出环境变量，确保子进程可以访问
           export OPENAI_API_KEY="$API_KEY"
           export OPENAI_API_BASE="$API_BASE"
+          export OPENAI_BASE_URL="$API_BASE"
+          export API_BASE_URL="$API_BASE"
           export OPENAI_MODEL="$MODEL"
 
           # 尝试创建配置文件（如果工具支持）
@@ -167,9 +175,23 @@ jobs:
           {
             "apiKey": "$API_KEY",
             "apiBase": "$API_BASE",
+            "baseURL": "$API_BASE",
             "model": "$MODEL"
           }
           EOF
+          
+          # 尝试创建 .env 文件（某些工具可能读取这个）
+          if [ -n "$OPENROUTER_API_KEY" ]; then
+            cat > .env <<EOF
+          OPENAI_API_KEY=$API_KEY
+          OPENAI_API_BASE=$API_BASE
+          OPENAI_BASE_URL=$API_BASE
+          API_BASE_URL=$API_BASE
+          OPENAI_MODEL=$MODEL
+          HTTP_REFERER=https://github.com/${{ github.repository }}
+          X_TITLE=GitHub Actions Agent
+          EOF
+          fi
 
           cat > CODEX_PROMPT.txt <<'PROMPT'
           Read ISSUE.md as a contract.
@@ -181,20 +203,43 @@ jobs:
 
           # `-` 表示从 stdin 读取 prompt
           # 使用 env 命令确保环境变量被正确传递
-          # 设置 OpenAI API base URL 和模型（如果使用 OpenRouter）
+          # 设置所有可能的 API base URL 环境变量名称（工具可能使用不同的名称）
           # 尝试通过 --model 参数传递模型（如果工具支持）
-          env OPENAI_API_KEY="$API_KEY" \
-              OPENAI_API_BASE="$API_BASE" \
-              OPENAI_MODEL="$MODEL" \
-              OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
-              CODEX_API_KEY="$API_KEY" \
-              npx -y @openai/codex exec --full-auto --model "$MODEL" -C . - < CODEX_PROMPT.txt || \
-          env OPENAI_API_KEY="$API_KEY" \
-              OPENAI_API_BASE="$API_BASE" \
-              OPENAI_MODEL="$MODEL" \
-              OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
-              CODEX_API_KEY="$API_KEY" \
-              npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt
+          if [ -n "$OPENROUTER_API_KEY" ]; then
+            # 使用 OpenRouter，设置所有可能的环境变量
+            env OPENAI_API_KEY="$API_KEY" \
+                OPENAI_API_BASE="$API_BASE" \
+                OPENAI_BASE_URL="$API_BASE" \
+                API_BASE_URL="$API_BASE" \
+                OPENAI_MODEL="$MODEL" \
+                OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
+                HTTP_REFERER="https://github.com/${{ github.repository }}" \
+                X_TITLE="GitHub Actions Agent" \
+                CODEX_API_KEY="$API_KEY" \
+                npx -y @openai/codex exec --full-auto --model "$MODEL" -C . - < CODEX_PROMPT.txt || \
+            env OPENAI_API_KEY="$API_KEY" \
+                OPENAI_API_BASE="$API_BASE" \
+                OPENAI_BASE_URL="$API_BASE" \
+                API_BASE_URL="$API_BASE" \
+                OPENAI_MODEL="$MODEL" \
+                OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
+                HTTP_REFERER="https://github.com/${{ github.repository }}" \
+                X_TITLE="GitHub Actions Agent" \
+                CODEX_API_KEY="$API_KEY" \
+                npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt
+          else
+            # 使用 OpenAI
+            env OPENAI_API_KEY="$API_KEY" \
+                OPENAI_API_BASE="$API_BASE" \
+                OPENAI_MODEL="$MODEL" \
+                CODEX_API_KEY="$API_KEY" \
+                npx -y @openai/codex exec --full-auto --model "$MODEL" -C . - < CODEX_PROMPT.txt || \
+            env OPENAI_API_KEY="$API_KEY" \
+                OPENAI_API_BASE="$API_BASE" \
+                OPENAI_MODEL="$MODEL" \
+                CODEX_API_KEY="$API_KEY" \
+                npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt
+          fi
 
       - name: Prepare PR metadata
         id: pr_meta

@@ -125,6 +125,14 @@ jobs:
           # 显式导出环境变量，确保子进程可以访问
           export OPENAI_API_KEY
 
+          # 尝试创建配置文件（如果工具支持）
+          # 某些工具可能需要配置文件而不是环境变量
+          cat > .codexrc.json <<EOF
+          {
+            "apiKey": "$OPENAI_API_KEY"
+          }
+          EOF
+
           cat > CODEX_PROMPT.txt <<'PROMPT'
           Read ISSUE.md as a contract.
           Follow AGENT_PROTOCOL.md.
@@ -134,8 +142,11 @@ jobs:
           PROMPT
 
           # `-` 表示从 stdin 读取 prompt
-          # 确保环境变量传递给 npx（显式传递）
-          OPENAI_API_KEY="$OPENAI_API_KEY" npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt
+          # 使用 env 命令确保环境变量被正确传递
+          # 同时设置多个可能的环境变量名称以防工具使用不同的名称
+          env OPENAI_API_KEY="$OPENAI_API_KEY" \
+              CODEX_API_KEY="$OPENAI_API_KEY" \
+              npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt
 
       - name: Prepare PR metadata
         id: pr_meta

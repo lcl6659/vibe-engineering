@@ -246,74 +246,7 @@ jobs:
           You must create or modify at least one source file to complete this task.
           PROMPT
 
-      - name: Run Codex
-        continue-on-error: true
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          CODEX_MODEL: ${{ secrets.CODEX_MODEL }}
-        run: |
-          # `-` 表示从 stdin 读取 prompt
-          # Codex 工具会从 ~/.codex/config.toml 读取配置
-          # 禁用 MCP 和 reasoning 以避免无限循环
-          # 设置超时：5 分钟超时，快速失败避免无限循环
-          # 执行 Codex（优先级：OpenAI > OpenRouter）
-          echo "=== Starting Codex execution ==="
-          echo "Model: $MODEL"
-          echo "Provider: $([ -n "$OPENAI_API_KEY" ] && echo "OpenAI" || echo "OpenRouter")"
-          echo "Working directory: $(pwd)"
-          echo "Files in repo:"
-          ls -la | head -20
-          echo ""
-          echo "=== Codex Prompt ==="
-          cat CODEX_PROMPT.txt
-          echo ""
-          echo "=== Running Codex ==="
-
-          if [ -n "$OPENAI_API_KEY" ]; then
-            # 使用 OpenAI 直接 API（更兼容 Codex）
-            timeout 300 env OPENAI_API_KEY="$API_KEY" \
-                CODEX_DISABLE_MCP="true" \
-                MCP_DISABLED="true" \
-                CODEX_DISABLE_REASONING="true" \
-                CODEX_REASONING_EFFORT="none" \
-                npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt 2>&1 || {
-              echo ""
-              echo "⚠️ Codex execution timed out or failed after 5 minutes"
-              echo "Exit code: $?"
-              echo "Continuing workflow despite Codex failure..."
-            }
-          elif [ -n "$OPENROUTER_API_KEY" ]; then
-            # 使用 OpenRouter（可能有工具调用兼容性问题）
-            timeout 300 env OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
-                HTTP_REFERER="https://github.com/${{ github.repository }}" \
-                X_TITLE="GitHub Actions Agent" \
-                CODEX_DISABLE_MCP="true" \
-                MCP_DISABLED="true" \
-                CODEX_DISABLE_REASONING="true" \
-                CODEX_REASONING_EFFORT="none" \
-                npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt 2>&1 || {
-              echo ""
-              echo "⚠️ Codex execution timed out or failed after 5 minutes"
-              echo "Exit code: $?"
-              echo "Note: OpenRouter may have tool call compatibility issues with Codex"
-              echo "Consider using OPENAI_API_KEY instead for better compatibility"
-              echo "Continuing workflow despite Codex failure..."
-            }
-          fi
-
-      - name: Check if fallback needed
-        id: check_fallback
-        run: |
-          if git diff --quiet && [ ! -f EXEC_PLAN.md ]; then
-            echo "needed=true" >> $GITHUB_OUTPUT
-          else
-            echo "needed=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Fallback Implementation (if Codex failed)
-        if: steps.check_fallback.outputs.needed == 'true'
-        continue-on-error: true
+      - name: Implement Issue
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -321,10 +254,25 @@ jobs:
           HTTP_REFERER: https://github.com/${{ github.repository }}
           X_TITLE: GitHub Actions Agent
         run: |
-          echo "=== Using Fallback Implementation Script ==="
-          python3 scripts/implement_issue.py || {
-            echo "⚠️ Fallback script also failed, but continuing..."
-          }
+          echo "=== 开始实现 Issue ==="
+          echo "工作目录: $(pwd)"
+          echo "文件列表:"
+          ls -la | head -10
+          echo ""
+          echo "=== Issue 内容 ==="
+          cat ISSUE.md | head -20
+          echo ""
+          echo "=== 运行实现脚本 ==="
+          python3 scripts/implement_issue.py
+          echo ""
+          echo "=== 检查生成的文件 ==="
+          if [ -f EXEC_PLAN.md ]; then
+            echo "✅ EXEC_PLAN.md 已创建"
+            cat EXEC_PLAN.md
+          fi
+          echo ""
+          echo "=== 文件变更 ==="
+          git status --short || echo "无变更"
 
       - name: Run tests (if available)
         continue-on-error: true

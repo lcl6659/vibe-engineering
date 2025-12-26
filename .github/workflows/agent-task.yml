@@ -119,12 +119,12 @@ jobs:
           echo "Issue content saved to ISSUE.md"
 
       - name: Run Codex
+        continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           CODEX_MODEL: ${{ secrets.CODEX_MODEL }}
         run: |
-          set -e
 
           # 优先使用 OpenRouter（如果配置了），否则使用 OpenAI
           if [ -n "$OPENROUTER_API_KEY" ]; then
@@ -145,6 +145,7 @@ jobs:
           model_provider = "openrouter"
           model = "$MODEL"
           model_reasoning_effort = "none"
+          reasoning_summaries = "never"
           disable_response_storage = true
           preferred_auth_method = "apikey"
           # 禁用 MCP 服务器以避免连接等待
@@ -233,30 +234,27 @@ jobs:
           PLAN
 
           cat > CODEX_PROMPT.txt <<'PROMPT'
-          You are an AI coding agent. Your task is to read ISSUE.md (the contract) and AGENT_PROTOCOL.md (the rules), then implement the requirements.
+          Read ISSUE.md and AGENT_PROTOCOL.md, then implement the requirements.
 
-          Steps:
-          1. Read ISSUE.md to understand what needs to be built
-          2. Read AGENT_PROTOCOL.md to understand the rules and constraints
-          3. Create or update EXEC_PLAN.md with:
-             - A concrete plan listing exact files to create/modify
-             - Progress checkboxes
-             - Key decisions
-          4. Implement the code changes (create/modify at least one source file)
-          5. If tests exist, run them; if not, note this in EXEC_PLAN.md
+          Execute immediately:
+          - Read ISSUE.md (contract) and AGENT_PROTOCOL.md (rules)
+          - Create/update EXEC_PLAN.md with plan and files to modify
+          - Write code changes (at least one file)
+          - Run tests if available
 
-          Rules:
-          - Make minimal, focused changes that directly address ISSUE.md
-          - Do not refactor unrelated code
-          - Ensure all changes produce a non-empty git diff
-          - Write code that is readable and maintainable
-
-          Start by reading ISSUE.md and AGENT_PROTOCOL.md, then proceed with implementation.
+          Do not think or discuss. Just execute commands and write files.
           PROMPT
 
+      - name: Run Codex
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CODEX_MODEL: ${{ secrets.CODEX_MODEL }}
+        run: |
           # `-` 表示从 stdin 读取 prompt
           # Codex 工具会从 ~/.codex/config.toml 读取配置
-          # 禁用 MCP 以避免连接等待（mcp startup: no servers）
+          # 禁用 MCP 和 reasoning 以避免无限循环
           # 设置超时：5 分钟超时，快速失败避免无限循环
           # 设置必要的环境变量
           if [ -n "$OPENROUTER_API_KEY" ]; then
@@ -266,18 +264,22 @@ jobs:
                 X_TITLE="GitHub Actions Agent" \
                 CODEX_DISABLE_MCP="true" \
                 MCP_DISABLED="true" \
+                CODEX_DISABLE_REASONING="true" \
+                CODEX_REASONING_EFFORT="none" \
                 npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt || {
               echo "⚠️ Codex execution timed out or failed after 5 minutes"
-              exit 1
+              echo "Continuing workflow despite Codex failure..."
             }
           else
             # 使用 OpenAI
             timeout 300 env OPENAI_API_KEY="$API_KEY" \
                 CODEX_DISABLE_MCP="true" \
                 MCP_DISABLED="true" \
+                CODEX_DISABLE_REASONING="true" \
+                CODEX_REASONING_EFFORT="none" \
                 npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt || {
               echo "⚠️ Codex execution timed out or failed after 5 minutes"
-              exit 1
+              echo "Continuing workflow despite Codex failure..."
             }
           fi
 

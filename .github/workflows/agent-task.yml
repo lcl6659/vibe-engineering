@@ -284,6 +284,7 @@ jobs:
 
       - name: Comment on issue
         if: github.event_name != 'workflow_dispatch' && steps.create_pr.outputs.pull-request-number
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           PR_NUMBER: ${{ steps.create_pr.outputs.pull-request-number }}
@@ -295,15 +296,34 @@ jobs:
               console.log(`Skipping comment: invalid issue number (${process.env.ISSUE_NUMBER})`);
               return;
             }
-            github.rest.issues.createComment({
-              issue_number: issueNumber,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `✅ PR created: #${process.env.PR_NUMBER}\n\nThe AI agent has completed the task. Please review the changes.`
-            })
+            try {
+              // 先检查 Issue 是否存在
+              await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+              
+              // Issue 存在，添加评论
+              await github.rest.issues.createComment({
+                issue_number: issueNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `✅ PR created: #${process.env.PR_NUMBER}\n\nThe AI agent has completed the task. Please review the changes.`
+              });
+              console.log(`✅ Comment added to issue #${issueNumber}`);
+            } catch (error) {
+              if (error.status === 404) {
+                console.log(`⚠️ Issue #${issueNumber} not found (may be deleted or closed), skipping comment`);
+              } else {
+                console.log(`⚠️ Failed to comment on issue #${issueNumber}: ${error.message}`);
+              }
+              // 不抛出错误，让 workflow 继续
+            }
 
       - name: Comment on failure
         if: github.event_name != 'workflow_dispatch' && failure()
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           ISSUE_NUMBER: ${{ steps.pr_meta.outputs.issue_number }}
@@ -314,9 +334,27 @@ jobs:
               console.log(`Skipping comment: invalid issue number (${process.env.ISSUE_NUMBER})`);
               return;
             }
-            github.rest.issues.createComment({
-              issue_number: issueNumber,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `❌ AI agent task failed. Please check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.`
-            })
+            try {
+              // 先检查 Issue 是否存在
+              await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+              
+              // Issue 存在，添加评论
+              await github.rest.issues.createComment({
+                issue_number: issueNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `❌ AI agent task failed. Please check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.`
+              });
+              console.log(`✅ Comment added to issue #${issueNumber}`);
+            } catch (error) {
+              if (error.status === 404) {
+                console.log(`⚠️ Issue #${issueNumber} not found (may be deleted or closed), skipping comment`);
+              } else {
+                console.log(`⚠️ Failed to comment on issue #${issueNumber}: ${error.message}`);
+              }
+              // 不抛出错误，让 workflow 继续
+            }

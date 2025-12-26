@@ -18,7 +18,17 @@ This repository documents the minimal automation needed to run an issue-driven a
 - `.github/ISSUE_TEMPLATE/*`: Feature/Bug/Release templates for PM/FE/BE/Ops.
 - `PULL_REQUEST_TEMPLATE.md`: PR template requiring evidence, risks, and rollback.
 
+## Quick Start
+
+想要测试整个流程？查看 `EXAMPLE_ISSUE.md` 获取完整的测试 Issue 示例。
+
+1. 复制 `EXAMPLE_ISSUE.md` 中的内容
+2. 在 GitHub 创建新 Issue，标题以 `[Agent]` 开头
+3. 粘贴内容并提交
+4. GitHub Actions 会自动运行，Codex 会生成代码并创建 PR
+5. 检查 PR 中的代码改动，确认可以运行
+
 ## Operating Guidelines
-- Treat each issue as the contract for the agent’s work; keep requirements and acceptance criteria there.
+- Treat each issue as the contract for the agent's work; keep requirements and acceptance criteria there.
 - Prefer small, reviewable changes with clear assumptions documented in commits or the PR body.
 - Use the review checklist to catch clarity, scope, and testing risks early.

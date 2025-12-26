@@ -398,6 +398,18 @@ jobs:
             git diff --cached --stat
           fi
 
+      - name: Verify code changes summary
+        continue-on-error: true
+        run: |
+          echo "=== Summary of Changes ==="
+          git diff --cached --stat || echo "No staged changes"
+          echo ""
+          echo "=== Files Changed ==="
+          git diff --cached --name-only || echo "No files changed"
+          echo ""
+          echo "=== Sample Changes (first 50 lines) ==="
+          git diff --cached | head -50 || echo "No diff available"
+
       - name: Create Pull Request
         id: create_pr
         uses: peter-evans/create-pull-request@v6

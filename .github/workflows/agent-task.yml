@@ -155,8 +155,8 @@ jobs:
           name = "OpenRouter"
           base_url = "$API_BASE"
           # 使用 Codex 支持的 wire_api 枚举值：chat / responses
-          # chat 已被 Codex 标记为即将废弃；这里改为 responses 以兼容新工具调用/Schema 校验
-          wire_api = "responses"
+          # 尝试使用 chat 以解决工具调用格式问题（虽然被标记为废弃，但可能更兼容）
+          wire_api = "chat"
           requires_openai_auth = false
           env_key = "OPENROUTER_API_KEY"
           EOF

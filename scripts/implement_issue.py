@@ -44,27 +44,41 @@ def main():
     print("✅ 已读取 ISSUE.md")
     
     # 获取 API key
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
+    openai_key = os.getenv("OPENAI_API_KEY")
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    
+    if not openai_key and not openrouter_key:
         print("❌ 错误: 未找到 API key (需要 OPENAI_API_KEY 或 OPENROUTER_API_KEY)")
         return 1
     
     # 配置客户端
     # 优先使用 OpenRouter 的 openai/gpt-5.1-codex（专为代码生成优化）
-    if os.getenv("OPENROUTER_API_KEY"):
+    if openrouter_key:
+        api_key = openrouter_key
         base_url = "https://openrouter.ai/api/v1"
         # 默认使用 openai/gpt-5.1-codex，专为代码生成优化
-        model = os.getenv("CODEX_MODEL", "openai/gpt-5.1-codex")
-        headers = {
+        model = os.getenv("CODEX_MODEL") or "openai/gpt-5.1-codex"
+        # OpenRouter 需要特定的 headers
+        extra_headers = {
             "HTTP-Referer": os.getenv("HTTP_REFERER", "https://github.com"),
             "X-Title": os.getenv("X_TITLE", "GitHub Actions")
         }
-    else:
+        print(f"✅ 使用 OpenRouter API")
+        client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers=extra_headers
+        )
+    elif openai_key:
+        api_key = openai_key
         base_url = "https://api.openai.com/v1"
-        model = os.getenv("CODEX_MODEL", "gpt-4o")
-        headers = {}
+        model = os.getenv("CODEX_MODEL") or "gpt-4o"
+        print(f"✅ 使用 OpenAI API")
+        client = OpenAI(api_key=api_key, base_url=base_url)
     
-    client = OpenAI(api_key=api_key, base_url=base_url, default_headers=headers)
+    print(f"🔑 API Key 长度: {len(api_key)}")
+    print(f"🤖 模型: {model}")
+    print(f"📍 Base URL: {base_url}")
     
     # 构建 prompt
     prompt = f"""你是一个编程助手。请实现 ISSUE.md 中的需求。
@@ -96,8 +110,7 @@ ISSUE.md 内容：
 4. 如果 Issue 要求创建脚本，必须创建实际的脚本文件
 """
     
-    print(f"📞 调用 API: {model}")
-    print(f"📍 Base URL: {base_url}")
+    print(f"\n📞 开始调用 API...")
     
     try:
         response = client.chat.completions.create(

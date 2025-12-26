@@ -234,25 +234,15 @@ jobs:
           PLAN
 
           cat > CODEX_PROMPT.txt <<'PROMPT'
-          You are a coding assistant. Your task is to implement the requirements described in ISSUE.md.
+          Implement the requirements in ISSUE.md following AGENT_PROTOCOL.md.
 
-          Steps to follow:
-          1. Read ISSUE.md to understand what needs to be built
-          2. Read AGENT_PROTOCOL.md to understand the rules and constraints
-          3. Create or update EXEC_PLAN.md with:
-             - A concrete plan listing exact files to create/modify
-             - Progress checkboxes
-             - Key decisions
-          4. Implement the code changes (create/modify at least one source file)
-          5. If tests exist, run them; if not, note this in EXEC_PLAN.md
+          First, read the files:
+          - cat ISSUE.md
+          - cat AGENT_PROTOCOL.md
 
-          Important rules from AGENT_PROTOCOL.md:
-          - Make minimal, focused changes that directly address ISSUE.md
-          - Do not refactor unrelated code
-          - Ensure all changes produce a non-empty git diff
-          - Write code that is readable and maintainable
+          Then create EXEC_PLAN.md with your plan, and implement the code changes.
 
-          Begin by reading ISSUE.md and AGENT_PROTOCOL.md.
+          You must create or modify at least one source file to complete this task.
           PROMPT
 
       - name: Run Codex
@@ -269,6 +259,17 @@ jobs:
           # 设置必要的环境变量
           if [ -n "$OPENROUTER_API_KEY" ]; then
             # 使用 OpenRouter，设置必要的环境变量
+            echo "=== Starting Codex execution ==="
+            echo "Model: $MODEL"
+            echo "Provider: OpenRouter"
+            echo "Working directory: $(pwd)"
+            echo "Files in repo:"
+            ls -la | head -20
+            echo ""
+            echo "=== Codex Prompt ==="
+            cat CODEX_PROMPT.txt
+            echo ""
+            echo "=== Running Codex ==="
             timeout 300 env OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
                 HTTP_REFERER="https://github.com/${{ github.repository }}" \
                 X_TITLE="GitHub Actions Agent" \
@@ -276,8 +277,10 @@ jobs:
                 MCP_DISABLED="true" \
                 CODEX_DISABLE_REASONING="true" \
                 CODEX_REASONING_EFFORT="none" \
-                npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt || {
+                npx -y @openai/codex exec --full-auto -C . - < CODEX_PROMPT.txt 2>&1 || {
+              echo ""
               echo "⚠️ Codex execution timed out or failed after 5 minutes"
+              echo "Exit code: $?"
               echo "Continuing workflow despite Codex failure..."
             }
           else

@@ -1,0 +1,33 @@
+name: Vibe Feature Validation
+
+on:
+  # 方式 1: 当你回复 /deploy 指令时触发
+  issue_comment:
+    types: [created]
+  # 方式 2: 当你给 PR 打上特定标签时触发
+  pull_request:
+    types: [labeled]
+
+jobs:
+  smoke-test:
+    # 只有包含 /deploy 指令，或者 PR 标签含有 'vibe-deploy' 时才运行
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/deploy')) ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'vibe-deploy')
+    
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: "Vibe Status: Waiting for Cloud Sync"
+        run: |
+          echo "检测到特性部署指令，等待云端（Railway/Vercel）构建完成..."
+          sleep 60 
+
+      - name: Run Smoke Test
+        env:
+          # 从 Secrets 获取你的生产/测试环境地址
+          BACKEND_URL: ${{ secrets.RAILWAY_BACKEND_URL }}
+        run: |
+          chmod +x ./smoke-test.sh
+          ./smoke-test.sh $BACKEND_URL

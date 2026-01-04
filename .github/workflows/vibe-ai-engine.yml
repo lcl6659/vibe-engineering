@@ -1,0 +1,77 @@
+name: Vibe AI Engine
+
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  vibe-assistant:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install axios @actions/github
+
+      - name: "AI: Process Issue (Spec Generation)"
+        if: github.event_name == 'issues'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { callOpenRouter } = require('./.github/scripts/vibe_ai.js');
+            const prompt = `你是一个全栈专家。基于以下需求，请为 Go 后端和 Next.js 前端生成技术方案：
+            标题: ${process.env.ISSUE_TITLE}
+            描述: ${process.env.ISSUE_BODY}
+            
+            要求提供：
+            1. Go 的关键 Struct 定义。
+            2. Next.js 的页面逻辑建议。
+            3. API 契约（JSON 格式说明）。`;
+            
+            const aiResponse = await callOpenRouter(prompt);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "🤖 **Vibe AI 架构建议:**\n\n" + aiResponse
+            });
+
+      - name: "AI: Code Review (Night Watch)"
+        if: github.event_name == 'pull_request'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { callOpenRouter } = require('./.github/scripts/vibe_ai.js');
+            const { data: diff } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              mediaType: { format: 'diff' }
+            });
+            
+            const prompt = `请对以下代码改动进行 Review。
+            技术栈: Go, Next.js, Tailwind CSS。
+            重点检查：Go 的错误处理、TypeScript 类型安全、Vibe Kanban 的简洁风格。
+            Diff 内容: \n${diff.substring(0, 5000)}`; // 截取防止过长
+            
+            const aiResponse = await callOpenRouter(prompt);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "🤖 **Vibe AI 代码评审:**\n\n" + aiResponse
+            });

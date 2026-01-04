@@ -1,360 +1,114 @@
-name: Agent Task Runner
+name: Agent Task Automation
+
 on:
   issues:
     types: [opened, labeled]
   workflow_dispatch:
-    inputs:
-      issue_number:
-        description: "可选：要读取的 Issue 编号（用于手动触发时拉取 issue body）"
-        required: false
-        type: string
-      issue_body:
-        description: "可选：直接提供 Issue body（优先于 issue_number）"
-        required: false
-        type: string
-
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
 
 jobs:
-  run-agent:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'agent-task') ||
-      (github.event.action == 'opened' && startsWith(github.event.issue.title, '[Agent]'))
+  implement:
     runs-on: ubuntu-latest
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      # 模型选择：可以通过 secret 覆盖默认值
-      # OpenRouter 模型格式：openai/gpt-4o, openai/gpt-5-chat 等
-      # OpenAI 模型格式：gpt-4o, gpt-4-turbo 等
-      CODEX_MODEL: ${{ secrets.CODEX_MODEL }}
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+    if: |
+      github.event.issue.title != '' && (
+        startsWith(github.event.issue.title, '[Agent]') ||
+        contains(github.event.label.name, 'agent-task')
+      ) || github.event_name == 'workflow_dispatch'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          node-version: "20"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Check API Key Set
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Save issue to ISSUE.md
         run: |
-          if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
-            echo "ERROR: Neither OPENROUTER_API_KEY nor OPENAI_API_KEY secret is set. Skipping agent run." >&2
-            exit 1
-          fi
-          if [ -n "$OPENROUTER_API_KEY" ]; then
-            echo "OpenRouter API key is set (will use OpenRouter)"
-          elif [ -n "$OPENAI_API_KEY" ]; then
-            echo "OpenAI API key is set (will use OpenAI)"
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            echo "${{ github.event.issue.body }}" > ISSUE.md
+            echo "Issue #${{ github.event.issue.number }}" >> ISSUE.md
           fi
 
-      - name: Read Issue
-        id: read_issue
+      - name: Run implementation script
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          # 安全地保存 issue 内容（避免 shell 展开/命令替换）
-          python3 - <<'PY'
-          import json
-          import os
-          import urllib.request
-          import urllib.error
-          from pathlib import Path
-
-          event_path = os.environ.get("GITHUB_EVENT_PATH")
-          if not event_path:
-            raise SystemExit("GITHUB_EVENT_PATH is not set")
-
-          payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
-
-          event_name = os.environ.get("GITHUB_EVENT_NAME") or ""
-          body = ""
-
-          if event_name == "workflow_dispatch":
-            inputs = payload.get("inputs") or {}
-            body = (inputs.get("issue_body") or "").strip()
-            issue_number = (inputs.get("issue_number") or "").strip()
-            if not body and issue_number:
-              repo = os.environ.get("GITHUB_REPOSITORY")
-              token = os.environ.get("GITHUB_TOKEN")
-              if not repo or not token:
-                raise SystemExit("GITHUB_REPOSITORY/GITHUB_TOKEN is not set; cannot fetch issue body")
-              url = f"https://api.github.com/repos/{repo}/issues/{issue_number}"
-              req = urllib.request.Request(
-                url,
-                headers={
-                  "Accept": "application/vnd.github+json",
-                  "Authorization": f"Bearer {token}",
-                  "X-GitHub-Api-Version": "2022-11-28",
-                  "User-Agent": "agent-task-runner",
-                },
-              )
-              try:
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                  issue = json.loads(resp.read().decode("utf-8"))
-              except urllib.error.HTTPError as e:
-                raise SystemExit(f"Failed to fetch issue #{issue_number}: HTTP {e.code}") from e
-              body = (issue.get("body") or "").strip()
-            if not body:
-              raise SystemExit("workflow_dispatch 需要提供 inputs.issue_body 或 inputs.issue_number")
-          else:
-            body = ((payload.get("issue") or {}).get("body") or "").strip()
-
-          Path("ISSUE.md").write_text(body, encoding="utf-8")
-          PY
-
-          echo "Issue content saved to ISSUE.md"
-
-      - name: Install Python dependencies
-        run: |
-          pip install openai --quiet
-
-      - name: Implement Issue
-        continue-on-error: true
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          CODEX_MODEL: ${{ secrets.MODEL }}
-          HTTP_REFERER: https://github.com/${{ github.repository }}
-          X_TITLE: GitHub Actions Agent
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          HTTP_REFERER: ${{ secrets.HTTP_REFERER }}
+          MODEL: ${{ secrets.MODEL }}
         run: |
-          echo "=== 开始实现 Issue ==="
-          echo "工作目录: $(pwd)"
-          echo "文件列表:"
-          ls -la | head -10
-          echo ""
-          echo "=== Issue 内容 ==="
-          cat ISSUE.md | head -20
-          echo ""
-          echo "=== 运行实现脚本 ==="
+          export HTTP_REFERER="${HTTP_REFERER:-https://github.com}"
+          export MODEL="${MODEL:-openai/gpt-5.1-codex}"
           python3 scripts/implement_issue.py
-          echo ""
-          echo "=== 检查生成的文件 ==="
-          if [ -f EXEC_PLAN.md ]; then
-            echo "✅ EXEC_PLAN.md 已创建"
-            cat EXEC_PLAN.md
-          fi
-          echo ""
-          echo "=== 文件变更 ==="
-          git status --short || echo "无变更"
 
-      - name: Run tests (if available)
-        continue-on-error: true
+      - name: Configure Git
         run: |
-          echo "=== Running tests (if available) ==="
-          # Try common test commands
-          if [ -f package.json ]; then
-            if grep -q '"test"' package.json; then
-              echo "Running npm test..."
-              npm test || echo "Tests failed or not configured"
-            fi
-          fi
-          if [ -f pytest.ini ] || [ -f setup.py ] || [ -f pyproject.toml ]; then
-            echo "Running pytest..."
-            python -m pytest || echo "Pytest failed or not configured"
-          fi
-          if [ -f Makefile ] && grep -q "^test:" Makefile; then
-            echo "Running make test..."
-            make test || echo "Make test failed"
-          fi
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
 
-      - name: Check execution plan
-        continue-on-error: true
+      - name: Create branch and commit
         run: |
-          if [ -f EXEC_PLAN.md ]; then
-            echo "=== Execution Plan ==="
-            cat EXEC_PLAN.md
-          else
-            echo "⚠️ EXEC_PLAN.md not found (agent may not have created it)"
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          if [ -z "$ISSUE_NUM" ]; then
+            ISSUE_NUM="manual-$(date +%s)"
+          fi
+          BRANCH="agent/issue-${ISSUE_NUM}"
+
+          git checkout -b "$BRANCH" || git checkout "$BRANCH"
+          git add -A
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
           fi
 
-      - name: Prepare PR metadata
-        id: pr_meta
-        run: |
-          set -e
+          git commit -m "Implement issue #${ISSUE_NUM}
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            title="[Agent PR] 手动触发 ${{ github.run_id }}"
-            branch="agent/manual-${{ github.run_id }}"
-            commit_message="agent: manual run ${{ github.run_id }}"
-            linked="(manual trigger)"
-            issue_number=""
-          else
-            title="[Agent PR] ${{ github.event.issue.title }}"
-            branch="agent/issue-${{ github.event.issue.number }}"
-            commit_message="agent: ${{ github.event.issue.title }}"
-            linked="#${{ github.event.issue.number }}"
-            issue_number="${{ github.event.issue.number }}"
+          - Auto-generated by GitHub Actions
+          - See ISSUE.md for requirements
+          - See EXEC_PLAN.md for implementation plan"
+
+      - name: Push changes
+        run: |
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          if [ -z "$ISSUE_NUM" ]; then
+            ISSUE_NUM="manual-$(date +%s)"
           fi
-
-          {
-            echo "This PR is automatically generated by the AI implementation script following Vibe Engineering principles."
-            echo ""
-            echo "Linked: $linked"
-            echo ""
-            
-            # Include execution plan if available
-            if [ -f EXEC_PLAN.md ]; then
-              echo "## Execution Plan"
-              echo ""
-              cat EXEC_PLAN.md
-              echo ""
-              echo "---"
-              echo ""
-            fi
-            
-            echo "## Issue Content"
-            echo ""
-            echo "----"
-            cat ISSUE.md
-            echo ""
-            echo ""
-            
-            echo "## Vibe Engineering Notes"
-            echo ""
-            echo "- Code changes follow AGENT_PROTOCOL.md"
-            echo "- Tests and documentation are included for both humans and future AI agents"
-            echo "- Changes are minimal, focused, and reviewable"
-          } > PR_BODY.md
-
-          echo "title=$title" >> "$GITHUB_OUTPUT"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
-          echo "commit_message=$commit_message" >> "$GITHUB_OUTPUT"
-          echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
-
-      - name: Debug git status
-        run: |
-          echo "=== Git Status ==="
-          git status
-          echo ""
-          echo "=== Changed Files ==="
-          git diff --name-only || echo "No changes"
-
-      - name: Stage all changes
-        run: git add -A
-
-      - name: Ensure code changes exist
-        run: |
-          if git diff --cached --quiet; then
-            echo "❌ Agent produced no code changes"
-            exit 1
-          else
-            echo "✅ Code changes detected:"
-            git diff --cached --stat
-          fi
-
-      - name: Verify code changes summary
-        continue-on-error: true
-        run: |
-          echo "=== Summary of Changes ==="
-          git diff --cached --stat || echo "No staged changes"
-          echo ""
-          echo "=== Files Changed ==="
-          git diff --cached --name-only || echo "No files changed"
-          echo ""
-          echo "=== Sample Changes (first 50 lines) ==="
-          git diff --cached | head -50 || echo "No diff available"
+          BRANCH="agent/issue-${ISSUE_NUM}"
+          git push origin "$BRANCH" || echo "Branch already exists or no changes"
 
       - name: Create Pull Request
-        id: create_pr
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          title: ${{ steps.pr_meta.outputs.title }}
-          body-path: PR_BODY.md
-          branch: ${{ steps.pr_meta.outputs.branch }}
-          commit-message: ${{ steps.pr_meta.outputs.commit_message }}
-          delete-branch: true
+          branch: agent/issue-${{ github.event.issue.number || 'manual' }}
+          title: "[Agent] Implement issue #${{ github.event.issue.number || 'manual' }}"
+          body: |
+            ## 自动生成的 PR
+
+            - **Issue**: #${{ github.event.issue.number || 'N/A' }}
+            - **实现计划**: 查看 `EXEC_PLAN.md`
+            - **Issue 内容**: 查看 `ISSUE.md`
+
+            ### 变更摘要
+
+            此 PR 由 GitHub Actions 自动生成，实现了 Issue 中的需求。
+
+            ### 验证
+
+            请检查：
+            - [ ] 代码符合 Issue 要求
+            - [ ] 遵循 Vibe Guide 最佳实践
+            - [ ] 代码可以运行
+            - [ ] 通过 ESLint 检查
+
+            ### 相关文件
+
+            - `ISSUE.md` - 原始需求
+            - `EXEC_PLAN.md` - 实现计划
           labels: |
-            ai-generated
-            automated-pr
-
-      - name: Comment on issue
-        if: github.event_name != 'workflow_dispatch' && steps.create_pr.outputs.pull-request-number
-        continue-on-error: true
-        uses: actions/github-script@v7
-        env:
-          PR_NUMBER: ${{ steps.create_pr.outputs.pull-request-number }}
-          ISSUE_NUMBER: ${{ steps.pr_meta.outputs.issue_number }}
-        with:
-          script: |
-            const issueNumber = Number(process.env.ISSUE_NUMBER);
-            if (!issueNumber || issueNumber <= 0) {
-              console.log(`Skipping comment: invalid issue number (${process.env.ISSUE_NUMBER})`);
-              return;
-            }
-            try {
-              // 先检查 Issue 是否存在
-              await github.rest.issues.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber
-              });
-              
-              // Issue 存在，添加评论
-              await github.rest.issues.createComment({
-                issue_number: issueNumber,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `✅ PR created: #${process.env.PR_NUMBER}\n\nThe AI agent has completed the task. Please review the changes.`
-              });
-              console.log(`✅ Comment added to issue #${issueNumber}`);
-            } catch (error) {
-              if (error.status === 404) {
-                console.log(`⚠️ Issue #${issueNumber} not found (may be deleted or closed), skipping comment`);
-              } else {
-                console.log(`⚠️ Failed to comment on issue #${issueNumber}: ${error.message}`);
-              }
-              // 不抛出错误，让 workflow 继续
-            }
-
-      - name: Comment on failure
-        if: github.event_name != 'workflow_dispatch' && failure()
-        continue-on-error: true
-        uses: actions/github-script@v7
-        env:
-          ISSUE_NUMBER: ${{ steps.pr_meta.outputs.issue_number }}
-        with:
-          script: |
-            const issueNumber = Number(process.env.ISSUE_NUMBER);
-            if (!issueNumber || issueNumber <= 0) {
-              console.log(`Skipping comment: invalid issue number (${process.env.ISSUE_NUMBER})`);
-              return;
-            }
-            try {
-              // 先检查 Issue 是否存在
-              await github.rest.issues.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber
-              });
-              
-              // Issue 存在，添加评论
-              await github.rest.issues.createComment({
-                issue_number: issueNumber,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `❌ AI agent task failed. Please check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.`
-              });
-              console.log(`✅ Comment added to issue #${issueNumber}`);
-            } catch (error) {
-              if (error.status === 404) {
-                console.log(`⚠️ Issue #${issueNumber} not found (may be deleted or closed), skipping comment`);
-              } else {
-                console.log(`⚠️ Failed to comment on issue #${issueNumber}: ${error.message}`);
-              }
-              // 不抛出错误，让 workflow 继续
-            }
+            agent-generated
+          draft: false

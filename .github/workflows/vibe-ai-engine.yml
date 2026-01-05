@@ -1,68 +1,50 @@
-name: Vibe AI Engine (Zero Dependency)
+name: AI Tech Architect
 
 on:
   issues:
-    types: [opened]
-  pull_request:
-    types: [opened, synchronize]
+    types: [labeled]
 
 jobs:
-  ai-orchestrator:
+  tech-arch:
+    if: github.event.label.name == '🛠 tech'
     runs-on: ubuntu-latest
     permissions:
       issues: write
-      pull-requests: write
 
     steps:
-      - name: "Vibe Flow: Run AI"
+      - name: "Tech Analysis"
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
-          EVENT_CONTEXT: ${{ github.event_name }}
         uses: actions/github-script@v7
         with:
           script: |
-            // 1. 使用原生 fetch，无需安装 axios，直接调用
-            async function askAI(prompt) {
-              const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                  'Content-Type': 'application/json',
-                  'HTTP-Referer': 'https://github.com/lessthanno/vibe-engineering-playbook/'
-                },
-                body: JSON.stringify({
-                  model: "anthropic/claude-sonnet-4.5", // 推荐用于架构设计
-                  messages: [{ role: "user", content: prompt }]
-                })
-              });
+            const prompt = `你是一个全栈专家。针对以下需求，为 Go + Next.js 团队制定技术方案：
+            标题: ${process.env.ISSUE_TITLE}
+            描述: ${process.env.ISSUE_BODY || "（无描述）"}
+            
+            请给出：Go 关键 Struct 定义、API 定义 (REST/gRPC)、Next.js 组件建议。`;
 
-              if (!response.ok) {
-                const error = await response.text();
-                throw new Error(`OpenRouter API Error: ${error}`);
-              }
+            const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://github.com/ai-tech-arch'
+              },
+              body: JSON.stringify({
+                model: "anthropic/claude-sonnet-4.5",
+                messages: [{ role: "user", content: prompt }]
+              })
+            });
 
-              const data = await response.json();
-              return data.choices[0].message.content;
-            }
+            const data = await response.json();
+            const aiResponse = data.choices[0].message.content;
 
-            // 2. 逻辑执行
-            if (process.env.EVENT_CONTEXT === 'issues') {
-              const prompt = `你是一个全栈专家。针对以下需求，为 Go + Next.js 团队制定技术方案：
-              标题: ${process.env.ISSUE_TITLE}
-              描述: ${process.env.ISSUE_BODY}
-              请给出：Go 关键 Struct 定义、API 定义、Next.js 组件建议。
-              请遵循 Vibe Kanban 的简洁风格。`;
-              
-              console.log("Sending request to OpenRouter...");
-              const aiResponse = await askAI(prompt);
-              
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: "🤖 **Vibe AI 架构建议:**\n\n" + aiResponse
-              });
-              console.log("Comment created successfully.");
-            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "🛠 **AI 技术架构建议:**\n\n" + aiResponse
+            });

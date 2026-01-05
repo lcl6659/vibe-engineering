@@ -6,7 +6,10 @@ on:
 
 jobs:
   tech-arch:
-    if: github.event.label.name == '🛠 tech'
+   # 确保只有包含 '🛠 tech' 的标签被添加时，此 Job 才真正运行
+    if: |
+      github.event.label.name == '🛠 tech' || 
+      (github.event.action == 'labeled' && github.event.label.name == '🛠 tech')
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -49,29 +52,46 @@ jobs:
               },
               body: JSON.stringify({
                 model: "anthropic/claude-sonnet-4.5", 
-                messages: [{ role: "user", content: prompt }],
-                response_format: { type: "json_object" }
+                messages: [{ role: "user", content: prompt }]
               })
             });
 
             const data = await response.json();
-            const result = JSON.parse(data.choices[0].message.content);
+            let rawContent = data.choices[0].message.content.trim();
 
+            // --- 核心修复：清洗 Markdown 标签 ---
+            if (rawContent.includes("```")) {
+              rawContent = rawContent.replace(/```json/g, "").replace(/```/g, "").trim();
+            }
+
+            let result;
+            try {
+              result = JSON.parse(rawContent);
+            } catch (e) {
+              console.error("原始返回内容:", rawContent);
+              // 如果解析失败，在评论区反馈报错，方便调试
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: "❌ AI 返回格式异常，无法解析 JSON。请检查 API 返回内容。"
+              });
+              return;
+            }
+
+            // --- 后续 Issue 处理逻辑 ---
             if (result.is_complex) {
-              // --- 大需求逻辑：拆分 Issue 并建立 Checklist ---
               let taskListMarkdown = "\n### 📋 任务分解进度 (Tasks)\n";
-              
               for (const task of result.tasks) {
                 const subIssue = await github.rest.issues.create({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   title: `[${task.role}] ${task.title}`,
-                  body: `## 🔗 关联 Epic: #${process.env.ISSUE_NUMBER}\n\n${task.body}\n\n--- \n请参考主 Issue 中的 Contract 定义进行开发。`,
+                  body: `## 🔗 关联 Epic: #${context.issue.number}\n\n${task.body}`,
                   labels: [task.role === 'FE' ? 'frontend' : 'backend', 'sub-task']
                 });
                 taskListMarkdown += `- [ ] #${subIssue.data.number} ${task.title}\n`;
               }
-
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -79,11 +99,10 @@ jobs:
                 body: `## 🏗 [Complex] 技术架构设计\n${result.analysis}\n\n### 💾 Backend Contract (Go)\n\`\`\`go\n${result.contract.be}\n\`\`\`\n### 🎨 Frontend Contract\n${result.contract.fe}\n\n---\n${taskListMarkdown}`
               });
             } else {
-              // --- 小需求逻辑：直接评论代码，不建子 Issue ---
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `## ⚡ [Simple] 快速实现建议\n> 此需求评估为小需求，已直接给出实现方案。\n\n### 🛠 思路分析\n${result.analysis}\n\n### 📝 代码建议\n**后端：**\n${result.contract.be}\n\n**前端：**\n${result.contract.fe}`
+                body: `## ⚡ [Simple] 实现建议\n${result.analysis}\n\n### 📝 代码方案\n**后端：**\n${result.contract.be}\n\n**前端：**\n${result.contract.fe}`
               });
             }

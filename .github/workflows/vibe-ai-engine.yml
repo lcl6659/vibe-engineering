@@ -30,10 +30,10 @@ jobs:
                 headers: {
                   'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
                   'Content-Type': 'application/json',
-                  'HTTP-Referer': 'https://github.com/vibe-kanban'
+                  'HTTP-Referer': 'https://github.com/lessthanno/vibe-engineering-playbook/'
                 },
                 body: JSON.stringify({
-                  model: "anthropic/claude-3.5-sonnet", // 推荐用于架构设计
+                  model: "anthropic/claude-sonnet-4.5", // 推荐用于架构设计
                   messages: [{ role: "user", content: prompt }]
                 })
               });

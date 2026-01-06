@@ -3,7 +3,10 @@ name: PR Checklist Review
 on:
   pull_request:
     types: [opened, synchronize]
-    if: contains(github.event.pull_request.labels.*.name, 'checklist')
+    branches:
+      - claude-code/auto-coding/**
+    
+if: contains(github.event.pull_request.labels.*.name, 'checklist')
 
 jobs:
   checklist:

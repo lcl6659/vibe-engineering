@@ -2,8 +2,7 @@ name: Demand Analysis with Claude
 
 on:
   issues:
-    types: [opened, labeled]  # 创建或后期加标签都触发
-    if: contains(github.event.issue.labels.*.name, 'claude-tech')
+    types: [opened, labeled] # 创建或后期加标签都触发
 
 jobs:
   analyze:
@@ -12,6 +11,7 @@ jobs:
     permissions:
       issues: write
       contents: read
+      id-token: write # 添加 OIDC token 权限
     steps:
       - uses: actions/checkout@v6
         with:
@@ -20,10 +20,13 @@ jobs:
       - name: Run Claude Code Action
         uses: anthropics/claude-code-action@v1
         env:
+          # OpenRouter 集成配置（参考：https://openrouter.ai/docs/guides/guides/claude-code-integration）
           ANTHROPIC_BASE_URL: https://openrouter.ai/api
         with:
-          api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          model: anthropic/claude-sonnet-4.5
+          # 使用 OpenRouter API key（文档要求使用 anthropic_api_key）
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          # 使用 GitHub token 避免 OIDC token 获取失败
+          github_token: ${{ github.token }}
           track_progress: true
           prompt: |
             REPO: ${{ github.repository }}
@@ -57,8 +60,7 @@ jobs:
             📋 任务分解进度
             - 建议创建的子 Issue 标题列表（用 [ ] 表示）
 
-            最后以结构化 JSON 输出任务列表（便于后续自动化创建子 Issue）：
+            最后以结构化 JSON 输出任务列表（便于后续自动化创建子 Issue）:
             {
               "tasks": ["[BE] xxx", "[FE] xxx", "..."]
             }
-          allowed_tools: '["github:get_issue", "github:comment_on_issue", "github:create_issue"]'

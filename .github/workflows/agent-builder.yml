@@ -122,7 +122,7 @@ jobs:
             console.log(`📦 生成了 ${files.length} 个文件，准备提交...`);
 
             // 5. Git 提交与 PR 流程
-            const branchName = `feature/impl-${context.issue.number}-${Date.now()}`;
+            const branchName = `zhangxiaohao/feature-${context.issue.number}-${Date.now()}`;
             
             // 获取 main 分支最新 SHA (如果你的主分支叫 master，请把下面的 'main' 改为 'master')
             const baseRef = await github.rest.git.getRef({ ...context.repo, ref: 'heads/main' });

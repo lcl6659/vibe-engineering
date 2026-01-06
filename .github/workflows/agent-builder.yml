@@ -736,66 +736,79 @@ jobs:
               }
             }
             
-            const implementationPlanDoc = `# Issue #${context.issue.number} 前端实施方案
-
-## 📋 需求信息
-
-**标题**: ${process.env.ISSUE_TITLE}
-
-**Issue**: #${context.issue.number}
-
-${parentIssueNumber ? `**父Issue**: #${parentIssueNumber}\n**分支**: \`${branchName}\`` : `**分支**: \`${branchName}\``}
-
-**创建时间**: ${new Date().toISOString()}
-
----
-
-## 📝 需求描述
-
-${contextBody.split('\n').slice(0, 50).join('\n')}${contextBody.split('\n').length > 50 ? '\n\n...' : ''}
-
----
-
-## 🎯 实施方案
-
-### 文件变更清单
-
-${createdFiles.length > 0 ? `**新建文件 (${createdFiles.length}):**\n${createdFiles.map(f => `- \`${f}\``).join('\n')}\n` : ''}
-
-${modifiedFiles.length > 0 ? `**修改文件 (${modifiedFiles.length}):**\n${modifiedFiles.map(f => `- \`${f}\``).join('\n')}\n` : ''}
-
-### 项目结构约束
-
-${constraintsSummary ? `**前端约束（来自父级 Issue 评论，按时间顺序，后面的优先级更高）**:\n\n${constraintsSummary}\n\n` : ''}
-
-${parentSpec && !constraintsSummary ? `**父级规范（优先级最高）**:\n\n${parentSpec.split('\n').slice(0, 100).join('\n')}${parentSpec.split('\n').length > 100 ? '\n\n...' : ''}\n` : ''}
-
-**默认项目结构规范**:
-- 页面文件: \`frontend/app/[route]/page.tsx\`
-- 布局文件: \`frontend/app/[route]/layout.tsx\`
-- 通用组件: \`frontend/components/ui/\`
-- 业务组件: \`frontend/components/features/\`
-- Hooks: \`frontend/hooks/\`
-- 工具函数: \`frontend/lib/utils/\`
-- 类型定义: \`frontend/types/\`
-
-${constraintsSummary ? `\n**⚠️ 约束优先级说明**:\n- 前端约束来自父级 Issue 的多个评论\n- 按时间顺序处理，后面的约束会覆盖或补充前面的约束\n- 如果约束之间有冲突，以最新的约束为准\n` : ''}
-
----
-
-## ⚠️ 警告
-
-${warnings.length > 0 ? warnings.map(w => `- ${w}`).join('\n') : '无警告'}
-
----
-
-## 📌 注意事项
-
-1. 此文档由 Agent Builder 自动生成
-2. 请验证代码变更后再合并 PR
-3. ${parentIssueNumber ? `此 Issue 基于父 Issue #${parentIssueNumber}，使用同一分支开发` : '此 Issue 创建了新分支'}
-4. ${constraintsSummary ? `前端约束可能来自父级 Issue 的多个评论，请仔细阅读所有约束` : ''}
-`;
+            // 构建实施方案文档（避免嵌套反引号导致 YAML 解析错误）
+            const branchInfo = parentIssueNumber 
+              ? '**父Issue**: #' + parentIssueNumber + '\n**分支**: `' + branchName + '`' 
+              : '**分支**: `' + branchName + '`';
+            
+            const createdFilesList = createdFiles.length > 0 
+              ? '**新建文件 (' + createdFiles.length + '):**\n' + createdFiles.map(f => '- `' + f + '`').join('\n') + '\n' 
+              : '';
+            
+            const modifiedFilesList = modifiedFiles.length > 0 
+              ? '**修改文件 (' + modifiedFiles.length + '):**\n' + modifiedFiles.map(f => '- `' + f + '`').join('\n') + '\n' 
+              : '';
+            
+            const constraintsSection = constraintsSummary 
+              ? `**前端约束（来自父级 Issue 评论，按时间顺序，后面的优先级更高）**:\n\n${constraintsSummary}\n\n` 
+              : '';
+            
+            const parentSpecSection = parentSpec && !constraintsSummary 
+              ? `**父级规范（优先级最高）**:\n\n${parentSpec.split('\n').slice(0, 100).join('\n')}${parentSpec.split('\n').length > 100 ? '\n\n...' : ''}\n` 
+              : '';
+            
+            const constraintsNote = constraintsSummary 
+              ? `\n**⚠️ 约束优先级说明**:\n- 前端约束来自父级 Issue 的多个评论\n- 按时间顺序处理，后面的约束会覆盖或补充前面的约束\n- 如果约束之间有冲突，以最新的约束为准\n` 
+              : '';
+            
+            const warningsList = warnings.length > 0 
+              ? warnings.map(w => `- ${w}`).join('\n') 
+              : '无警告';
+            
+            const parentIssueNote = parentIssueNumber 
+              ? `此 Issue 基于父 Issue #${parentIssueNumber}，使用同一分支开发` 
+              : '此 Issue 创建了新分支';
+            
+            const constraintsNote2 = constraintsSummary 
+              ? `前端约束可能来自父级 Issue 的多个评论，请仔细阅读所有约束` 
+              : '';
+            
+            // 使用字符串拼接避免 YAML 解析器将 ** 误认为别名引用
+            const implementationPlanDoc = '# Issue #' + context.issue.number + ' 前端实施方案\n\n' +
+              '## 📋 需求信息\n\n' +
+              '**标题**: ' + process.env.ISSUE_TITLE + '\n\n' +
+              '**Issue**: #' + context.issue.number + '\n\n' +
+              branchInfo + '\n\n' +
+              '**创建时间**: ' + new Date().toISOString() + '\n\n' +
+              '---\n\n' +
+              '## 📝 需求描述\n\n' +
+              contextBody.split('\n').slice(0, 50).join('\n') + (contextBody.split('\n').length > 50 ? '\n\n...' : '') + '\n\n' +
+              '---\n\n' +
+              '## 🎯 实施方案\n\n' +
+              '### 文件变更清单\n\n' +
+              createdFilesList + '\n' +
+              modifiedFilesList + '\n' +
+              '### 项目结构约束\n\n' +
+              constraintsSection +
+              parentSpecSection +
+              '**默认项目结构规范**:\n' +
+              '- 页面文件: `frontend/app/[route]/page.tsx`\n' +
+              '- 布局文件: `frontend/app/[route]/layout.tsx`\n' +
+              '- 通用组件: `frontend/components/ui/`\n' +
+              '- 业务组件: `frontend/components/features/`\n' +
+              '- Hooks: `frontend/hooks/`\n' +
+              '- 工具函数: `frontend/lib/utils/`\n' +
+              '- 类型定义: `frontend/types/`\n\n' +
+              constraintsNote + '\n' +
+              '---\n\n' +
+              '## ⚠️ 警告\n\n' +
+              warningsList + '\n\n' +
+              '---\n\n' +
+              '## 📌 注意事项\n\n' +
+              '1. 此文档由 Agent Builder 自动生成\n' +
+              '2. 请验证代码变更后再合并 PR\n' +
+              '3. ' + parentIssueNote + '\n' +
+              (constraintsNote2 ? '4. ' + constraintsNote2 + '\n' : '');
 
             // 保存实施方案文档
             const docPath = `frontend/lib/doc/implementation-plan-issue-${context.issue.number}.md`;

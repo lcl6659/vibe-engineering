@@ -464,7 +464,7 @@ jobs:
             let frontendSpecNote = '';
             if (frontendSpec || frontendPlan) {
               frontendSpecNote = '\n\n【🚨 前端规范和方案（最高优先级 - 必须严格遵守）】\n';
-              frontendSpecNote += '**⚠️ 重要：以下规范优先级高于所有其他规范，包括基础开发规范文档。如有冲突，必须优先遵循以下规范。**\n\n';
+              frontendSpecNote += '**⚠️ 重要：以下规范优先级高于所有其他规范（包括基础开发规范文档）。如有冲突，必须优先遵循以下规范。**\n\n';
               if (frontendSpec) {
                 // 检查是否来自父级 issue（通过检查 contextBody 中是否包含"来自父级 Issue"）
                 const isFromParent = contextBody.includes('前端规范（来自父级 Issue）');
@@ -491,7 +491,7 @@ jobs:
             let styleGuideNote = '';
             if (styleGuideContent) {
               const priorityNote = (frontendSpec || frontendPlan) 
-                ? '\n**⚠️ 注意：这是基础开发规范。如果上面的"前端规范和方案"中有冲突的规范，优先遵循上面的规范。**\n'
+                ? '\n**⚠️ 注意：这是基础开发规范。如果上面的前端规范和方案中有冲突的规范，优先遵循上面的规范。**\n'
                 : '\n**这是项目的基础前端开发规范，所有代码必须严格遵循。**\n';
               
               styleGuideNote = '\n\n【📚 前端开发规范（基础规范）】\n' +
@@ -589,7 +589,7 @@ jobs:
               '   - 禁止 Markdown 注释（如 <!-- 注释 -->）\n' +
               '3. **禁止任何文档说明**：\n' +
               '   - 禁止实现说明、步骤说明、注释说明等文字描述\n' +
-              '   - 禁止在代码中添加"步骤1"、"步骤2"等说明性文字\n' +
+              '   - 禁止在代码中添加步骤1、步骤2等说明性文字\n' +
               '   - 禁止在代码末尾添加任何说明性内容\n' +
               '4. **只允许代码注释**：\n' +
               '   - 只允许使用 // 或 /* */ 格式的代码注释\n' +

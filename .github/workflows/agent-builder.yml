@@ -149,7 +149,7 @@ jobs:
             // "基于"表示从指定分支读取文件，但写入到当前分支
             // "使用"、"在"表示直接在指定分支上工作
             const branchMarkers = [
-              { pattern: /基于分支[\s:：]+([^\s\n]+)/i, type: 'base' }, // 基于分支xxx
+              { pattern: /基于分支[\s:：]*([^\s\n]+)/i, type: 'base' }, // 基于分支xxx（支持无空格）
               { pattern: /基于[\s:：]+([^\s\n]+)\s*分支/i, type: 'base' }, // 基于某某分支
               { pattern: /基于[\s:：]+([^\s\n]+)/i, type: 'base' }, // 基于某某
               { pattern: /使用分支[\s:：]+([^\s\n]+)/i, type: 'work' }, // 使用分支
@@ -250,17 +250,25 @@ jobs:
               }
               if (branchMatch) {
                 let branchValue = branchMatch[1].trim();
+                console.log(`🔍 匹配到的原始分支值: "${branchValue}"`);
                 
                 // 去掉远程仓库前缀（如 origin/, remotes/origin/ 等）
+                const beforeReplace = branchValue;
                 branchValue = branchValue.replace(/^(origin|remotes\/origin|remotes)\//, '');
+                if (beforeReplace !== branchValue) {
+                  console.log(`🔍 去掉远程前缀: "${beforeReplace}" -> "${branchValue}"`);
+                }
                 
                 let normalizedBranch = '';
                 if (/^\d+$/.test(branchValue)) {
                   normalizedBranch = `zhangxiaohao/issue-${branchValue}`;
+                  console.log(`🔍 数字格式，标准化为: "${normalizedBranch}"`);
                 } else if (branchValue.startsWith('zhangxiaohao/issue-')) {
                   normalizedBranch = branchValue;
+                  console.log(`🔍 已符合标准格式: "${normalizedBranch}"`);
                 } else {
                   normalizedBranch = branchValue;
+                  console.log(`🔍 使用原始值: "${normalizedBranch}"`);
                 }
                 
                 if (branchMatchType === 'base') {
@@ -384,6 +392,9 @@ jobs:
             let readBranch = null; // 读取文件的分支
             let writeBranch = `zhangxiaohao/issue-${context.issue.number}`; // 写入文件的分支
             
+            // 调试：输出分支识别结果
+            console.log(`🔍 分支识别结果: baseBranchFromComment=${baseBranchFromComment}, branchFromComment=${branchFromComment}`);
+            
             // 确定写入分支
             if (branchFromComment) {
               writeBranch = branchFromComment;
@@ -448,9 +459,9 @@ jobs:
               });
             }
             
-            // 如果从文本中没有找到文件路径，读取当前分支中的前端文件，让大模型自己判断
+            // 如果从文本中没有找到文件路径，读取读取分支中的前端文件，让大模型自己判断
             if (foundPaths.size === 0) {
-              console.log('📋 文本中没有找到文件路径，读取当前分支中的前端文件，让大模型判断需要修改哪些文件');
+              console.log(`📋 文本中没有找到文件路径，读取读取分支(${readBranch || '待确定'})中的前端文件，让大模型判断需要修改哪些文件`);
               
               try {
                 const branchRef = await github.rest.git.getRef({
@@ -466,7 +477,7 @@ jobs:
                   tree_sha: commit.data.tree.sha,
                   recursive: true
                 });
-                
+                  
                 // 筛选前端文件（.tsx, .ts），最多读取 50 个文件
                 const frontendFiles = tree.data.tree
                   .filter(item => item.type === 'blob' && 
@@ -755,7 +766,7 @@ jobs:
               content = content.replace(/\n{3,}/g, '\n\n');
               return content.trim();
             };
-            
+
             for (const line of lines) {
               // 检测文件标记（MODIFY 或 CREATE）
               const modifyMatch = line.trim().match(/^###\s*MODIFY:\s*(.+)$/);
@@ -910,7 +921,7 @@ jobs:
               
               // 获取基础 tree SHA
               const baseCommit = await github.rest.git.getCommit({ 
-                ...context.repo, 
+                ...context.repo,
                 commit_sha: baseSha 
               });
               const baseTreeSha = baseCommit.data.tree.sha;
@@ -924,7 +935,7 @@ jobs:
                 // 创建文件 blob
                 const blob = await github.rest.git.createBlob({
                   ...context.repo,
-                  content: Buffer.from(file.content).toString('base64'),
+                content: Buffer.from(file.content).toString('base64'),
                   encoding: 'base64'
                 });
                 
@@ -933,14 +944,14 @@ jobs:
                   mode: '100644',
                   type: 'blob',
                   sha: blob.data.sha
-                });
-                
-                if (file.action === 'CREATE') {
-                  createdFiles.push(file.path);
-                } else {
-                  modifiedFiles.push(file.path);
-                }
+              });
+              
+              if (file.action === 'CREATE') {
+                createdFiles.push(file.path);
+              } else {
+                modifiedFiles.push(file.path);
               }
+            }
               
               // 创建新的 tree
               const newTree = await github.rest.git.createTree({
@@ -1044,12 +1055,16 @@ jobs:
             // 生成操作说明
             const operationSummary = generateOperationSummary();
             
+            // 确定PR的base分支
+            const prBaseBranch = baseBranchFromComment || 'main';
+            console.log(`🔀 PR信息: head=${writeBranch}, base=${prBaseBranch}, baseBranchFromComment=${baseBranchFromComment}`);
+            
             try {
               const pr = await github.rest.pulls.create({
                 ...context.repo,
                 title: `[FE] ${process.env.ISSUE_TITLE}`,
                 head: writeBranch,
-                base: baseBranchFromComment || 'main',
+                base: prBaseBranch,
                 body: prBody
               });
               

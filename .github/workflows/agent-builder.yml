@@ -121,32 +121,161 @@ jobs:
               .map(c => `[User: ${c.user.login}]:\n${c.body}`)
               .join("\n\n---\n\n");
 
-            // 2. 读取父级规范（包含评论）
+            // 2. 读取父级规范（包含评论）并确定分支策略
             let contextBody = process.env.ISSUE_BODY;
             let parentSpec = '';
+            let parentIssueNumber = null;
             const parentRegex = /(?:Parent|Ref|父任务|父级|父需求|关联父需求)[\s:：]+#(\d+)/i;
             const parentMatch = contextBody.match(parentRegex);
             if (parentMatch) {
               try {
                 const parentId = parentMatch[1];
+                parentIssueNumber = parseInt(parentId);
                 console.log(`🔗 读取父级规范: #${parentId}`);
                 
                 // 读取父级 issue body
                 const p = await github.rest.issues.get({ ...context.repo, issue_number: parentId });
                 parentSpec = p.data.body;
                 
-                // 读取父级 issue 的评论（可能包含架构师的设计方案）
+                // 读取父级 issue 的评论（可能包含架构师的设计方案和前端约束）
                 const parentComments = await github.rest.issues.listComments({
                   ...context.repo,
                   issue_number: parentId
                 });
                 
-                // 合并父级规范和评论
+                // 智能提取前端约束：按时间顺序处理，后面的评论优先级更高
                 if (parentComments.data.length > 0) {
-                  const parentCommentsText = parentComments.data
-                    .map(c => `[${c.user.login}]:\n${c.body}`)
-                    .join("\n\n---\n\n");
-                  parentSpec += '\n\n--- [父级 Issue 评论] ---\n' + parentCommentsText;
+                  // 按创建时间排序（最早的在前）
+                  const sortedComments = parentComments.data.sort((a, b) => 
+                    new Date(a.created_at) - new Date(b.created_at)
+                  );
+                  
+                  // 识别前端约束的标记模式（支持多种格式）
+                  const constraintMarkers = [
+                    /前端约束/i,
+                    /前端规范/i,
+                    /frontend constraint/i,
+                    /frontend spec/i,
+                    /\[前端约束\]/i,
+                    /\[前端规范\]/i,
+                    /## 前端约束/i,
+                    /## 前端规范/i,
+                    /### 前端约束/i,
+                    /### 前端规范/i,
+                    /前端实施方案/i,
+                    /frontend implementation/i
+                  ];
+                  
+                  // 识别约束更新/撤销标记
+                  const updateMarkers = [
+                    /更新约束/i,
+                    /更新规范/i,
+                    /撤销约束/i,
+                    /撤销规范/i,
+                    /update constraint/i,
+                    /revoke constraint/i
+                  ];
+                  
+                  // 提取所有包含约束的评论
+                  const constraintComments = [];
+                  const generalComments = [];
+                  
+                  sortedComments.forEach(comment => {
+                    const hasConstraint = constraintMarkers.some(marker => 
+                      marker.test(comment.body)
+                    );
+                    
+                    const isUpdate = updateMarkers.some(marker => 
+                      marker.test(comment.body)
+                    );
+                    
+                    if (hasConstraint || isUpdate) {
+                      constraintComments.push({
+                        body: comment.body,
+                        user: comment.user.login,
+                        createdAt: comment.created_at,
+                        url: comment.html_url,
+                        isUpdate: isUpdate
+                      });
+                    } else {
+                      // 也保留普通评论，可能包含重要信息
+                      generalComments.push({
+                        body: comment.body,
+                        user: comment.user.login,
+                        createdAt: comment.created_at
+                      });
+                    }
+                  });
+                  
+                  // 构建约束文本：后面的评论会覆盖前面的
+                  let constraintsText = '';
+                  if (constraintComments.length > 0) {
+                    console.log(`📋 发现 ${constraintComments.length} 个包含前端约束的评论`);
+                    
+                    // 提取约束内容（去除标记，只保留实际约束）
+                    const extractedConstraints = constraintComments.map((c, index) => {
+                      let constraintContent = c.body;
+                      
+                      // 尝试提取约束部分（在标记之后的内容）
+                      const constraintMatch = constraintContent.match(
+                        /(?:前端约束|前端规范|frontend constraint|frontend spec|\[前端约束\]|\[前端规范\]|## 前端约束|## 前端规范|### 前端约束|### 前端规范|前端实施方案|frontend implementation|更新约束|更新规范|撤销约束|撤销规范|update constraint|revoke constraint)[\s:：]*\n?([\s\S]*)/i
+                      );
+                      
+                      if (constraintMatch && constraintMatch[1]) {
+                        constraintContent = constraintMatch[1].trim();
+                      }
+                      
+                      return {
+                        content: constraintContent,
+                        user: c.user,
+                        createdAt: c.created_at,
+                        url: c.url,
+                        order: index + 1,
+                        isUpdate: c.isUpdate,
+                        timestamp: new Date(c.created_at).getTime()
+                      };
+                    });
+                    
+                    // 按时间顺序合并约束（后面的优先级更高）
+                    constraintsText = '--- [父级 Issue 前端约束 - 按时间顺序，后面的优先级更高] ---\n\n';
+                    constraintsText += `**重要提示**：共有 ${extractedConstraints.length} 个约束评论，按时间顺序处理。\n`;
+                    constraintsText += `**后面的约束会覆盖或补充前面的约束**，请仔细阅读所有约束，以最新的为准。\n\n`;
+                    
+                    extractedConstraints.forEach((constraint, index) => {
+                      const timeStr = new Date(constraint.createdAt).toISOString().replace('T', ' ').substring(0, 19);
+                      const typeLabel = constraint.isUpdate ? '【更新约束】' : '【约束】';
+                      
+                      constraintsText += `${typeLabel} #${constraint.order} - ${constraint.user} @ ${timeStr}\n`;
+                      constraintsText += `来源: ${constraint.url}\n\n`;
+                      constraintsText += `${constraint.content}\n\n`;
+                      
+                      if (index < extractedConstraints.length - 1) {
+                        constraintsText += '---\n\n';
+                      }
+                    });
+                    
+                    // 添加约束优先级说明
+                    if (extractedConstraints.length > 1) {
+                      const latestConstraint = extractedConstraints[extractedConstraints.length - 1];
+                      constraintsText += `\n**⚠️ 约束优先级说明**：\n`;
+                      constraintsText += `- 最新约束：约束 #${latestConstraint.order} (${latestConstraint.user} @ ${new Date(latestConstraint.createdAt).toISOString().substring(0, 10)})\n`;
+                      constraintsText += `- 如果约束之间有冲突，以最新的约束为准\n`;
+                      constraintsText += `- 如果约束是"更新"类型，表示是对之前约束的修改\n`;
+                    }
+                  }
+                  
+                  // 合并所有内容
+                  if (constraintsText) {
+                    parentSpec += '\n\n' + constraintsText;
+                  }
+                  
+                  // 如果有其他评论（不包含约束标记），也添加进去（但标记为一般讨论）
+                  if (generalComments.length > 0) {
+                    const generalText = generalComments
+                      .map(c => `[${c.user} @ ${new Date(c.createdAt).toISOString()}]:\n${c.body}`)
+                      .join("\n\n---\n\n");
+                    parentSpec += '\n\n--- [父级 Issue 其他讨论] ---\n' + generalText;
+                  }
                 }
                 
                 contextBody += '\n\n--- [父级规范 - 必须严格遵守] ---\n' + parentSpec;
@@ -510,26 +639,54 @@ jobs:
               validFiles.push(file);
             }
 
-            // 8. 创建分支并写入文件
-            const branchName = `zhangxiaohao/issue-${context.issue.number}`;
-            const baseRef = await github.rest.git.getRef({ ...context.repo, ref: 'heads/main' });
+            // 8. 智能分支策略：子issues使用父issue的分支
+            let branchName;
+            let baseRef;
             
-            try { 
-              await github.rest.git.createRef({ 
-                ...context.repo, 
-                ref: `refs/heads/${branchName}`, 
-                sha: baseRef.data.object.sha 
-              }); 
-            } catch (e) {
-              // 分支已存在，更新到最新 main
+            if (parentIssueNumber) {
+              // 如果有父issue，使用父issue的分支名
+              branchName = `zhangxiaohao/issue-${parentIssueNumber}`;
+              console.log(`🔗 检测到父issue #${parentIssueNumber}，使用分支: ${branchName}`);
+              
+              // 尝试获取父issue的分支
               try {
-                await github.rest.git.updateRef({
-                  ...context.repo,
-                  ref: `heads/${branchName}`,
-                  sha: baseRef.data.object.sha,
-                  force: true
+                baseRef = await github.rest.git.getRef({ 
+                  ...context.repo, 
+                  ref: `heads/${branchName}` 
                 });
-              } catch (e2) {}
+                console.log(`✅ 父issue分支已存在，将在此基础上继续开发`);
+              } catch (e) {
+                // 父issue分支不存在，从main创建
+                console.log(`⚠️ 父issue分支不存在，从main创建新分支`);
+                baseRef = await github.rest.git.getRef({ ...context.repo, ref: 'heads/main' });
+                await github.rest.git.createRef({ 
+                  ...context.repo, 
+                  ref: `refs/heads/${branchName}`, 
+                  sha: baseRef.data.object.sha 
+                });
+              }
+            } else {
+              // 没有父issue，创建新分支
+              branchName = `zhangxiaohao/issue-${context.issue.number}`;
+              baseRef = await github.rest.git.getRef({ ...context.repo, ref: 'heads/main' });
+              
+              try { 
+                await github.rest.git.createRef({ 
+                  ...context.repo, 
+                  ref: `refs/heads/${branchName}`, 
+                  sha: baseRef.data.object.sha 
+                }); 
+              } catch (e) {
+                // 分支已存在，更新到最新 main
+                try {
+                  await github.rest.git.updateRef({
+                    ...context.repo,
+                    ref: `heads/${branchName}`,
+                    sha: baseRef.data.object.sha,
+                    force: true
+                  });
+                } catch (e2) {}
+              }
             }
 
             const createdFiles = [];
@@ -564,7 +721,106 @@ jobs:
               }
             }
 
-            // 9. 创建 PR
+            // 9. 保存实施方案文档到 frontend/lib/doc
+            // 提取约束信息用于文档
+            let constraintsSummary = '';
+            if (parentSpec) {
+              // 检查是否有约束部分
+              const constraintMatch = parentSpec.match(/--- \[父级 Issue 前端约束[^\]]*\] ---([\s\S]*?)(?=\n---|$)/);
+              if (constraintMatch) {
+                constraintsSummary = constraintMatch[1].trim();
+                // 限制长度，避免文档过长
+                if (constraintsSummary.length > 2000) {
+                  constraintsSummary = constraintsSummary.substring(0, 2000) + '\n\n... (内容已截断，完整内容请查看父级 Issue)';
+                }
+              }
+            }
+            
+            const implementationPlanDoc = `# Issue #${context.issue.number} 前端实施方案
+
+## 📋 需求信息
+
+**标题**: ${process.env.ISSUE_TITLE}
+
+**Issue**: #${context.issue.number}
+
+${parentIssueNumber ? `**父Issue**: #${parentIssueNumber}\n**分支**: \`${branchName}\`` : `**分支**: \`${branchName}\``}
+
+**创建时间**: ${new Date().toISOString()}
+
+---
+
+## 📝 需求描述
+
+${contextBody.split('\n').slice(0, 50).join('\n')}${contextBody.split('\n').length > 50 ? '\n\n...' : ''}
+
+---
+
+## 🎯 实施方案
+
+### 文件变更清单
+
+${createdFiles.length > 0 ? `**新建文件 (${createdFiles.length}):**\n${createdFiles.map(f => `- \`${f}\``).join('\n')}\n` : ''}
+
+${modifiedFiles.length > 0 ? `**修改文件 (${modifiedFiles.length}):**\n${modifiedFiles.map(f => `- \`${f}\``).join('\n')}\n` : ''}
+
+### 项目结构约束
+
+${constraintsSummary ? `**前端约束（来自父级 Issue 评论，按时间顺序，后面的优先级更高）**:\n\n${constraintsSummary}\n\n` : ''}
+
+${parentSpec && !constraintsSummary ? `**父级规范（优先级最高）**:\n\n${parentSpec.split('\n').slice(0, 100).join('\n')}${parentSpec.split('\n').length > 100 ? '\n\n...' : ''}\n` : ''}
+
+**默认项目结构规范**:
+- 页面文件: \`frontend/app/[route]/page.tsx\`
+- 布局文件: \`frontend/app/[route]/layout.tsx\`
+- 通用组件: \`frontend/components/ui/\`
+- 业务组件: \`frontend/components/features/\`
+- Hooks: \`frontend/hooks/\`
+- 工具函数: \`frontend/lib/utils/\`
+- 类型定义: \`frontend/types/\`
+
+${constraintsSummary ? `\n**⚠️ 约束优先级说明**:\n- 前端约束来自父级 Issue 的多个评论\n- 按时间顺序处理，后面的约束会覆盖或补充前面的约束\n- 如果约束之间有冲突，以最新的约束为准\n` : ''}
+
+---
+
+## ⚠️ 警告
+
+${warnings.length > 0 ? warnings.map(w => `- ${w}`).join('\n') : '无警告'}
+
+---
+
+## 📌 注意事项
+
+1. 此文档由 Agent Builder 自动生成
+2. 请验证代码变更后再合并 PR
+3. ${parentIssueNumber ? `此 Issue 基于父 Issue #${parentIssueNumber}，使用同一分支开发` : '此 Issue 创建了新分支'}
+4. ${constraintsSummary ? `前端约束可能来自父级 Issue 的多个评论，请仔细阅读所有约束` : ''}
+`;
+
+            // 保存实施方案文档
+            const docPath = `frontend/lib/doc/implementation-plan-issue-${context.issue.number}.md`;
+            let docSha;
+            try {
+              const { data } = await github.rest.repos.getContent({ 
+                ...context.repo, 
+                path: docPath, 
+                ref: branchName 
+              });
+              docSha = data.sha;
+            } catch (e) {}
+            
+            await github.rest.repos.createOrUpdateFileContents({
+              ...context.repo,
+              path: docPath,
+              message: `docs(fe): add implementation plan for issue #${context.issue.number}`,
+              content: Buffer.from(implementationPlanDoc).toString('base64'),
+              branch: branchName,
+              sha: docSha
+            });
+            
+            console.log(`📄 已保存实施方案文档: ${docPath}`);
+
+            // 10. 创建或更新 PR（默认创建 Draft PR，需要验证）
             let prBody = '### 📦 变更清单\n\n';
             if (createdFiles.length > 0) {
               prBody += '**新建文件：**\n' + createdFiles.map(f => '- `' + f + '`').join('\n') + '\n';
@@ -575,26 +831,67 @@ jobs:
             if (warnings.length > 0) {
               prBody += '\n### ⚠️ 警告\n' + warnings.map(w => '- ' + w).join('\n');
             }
-            prBody += '\n\n---\n指令: `/code-zhangxiaohao-agent`\nIssue: #' + context.issue.number;
+            prBody += `\n\n### 📄 实施方案文档\n\n实施方案已保存到: \`frontend/lib/doc/implementation-plan-issue-${context.issue.number}.md\`\n`;
+            prBody += '\n\n---\n';
+            prBody += `指令: \`/code-zhangxiaohao-agent\`\n`;
+            prBody += `Issue: #${context.issue.number}\n`;
+            if (parentIssueNumber) {
+              prBody += `父Issue: #${parentIssueNumber}\n`;
+            }
+            prBody += `\n**⚠️ 此 PR 为 Draft 状态，请验证代码后再 Ready for Review**`;
+
+            // 检查是否已存在 PR
+            let existingPR = null;
+            try {
+              const prs = await github.rest.pulls.list({
+                ...context.repo,
+                head: `${context.repo.owner}:${branchName}`,
+                base: 'main',
+                state: 'all'
+              });
+              if (prs.data.length > 0) {
+                existingPR = prs.data[0];
+              }
+            } catch (e) {}
 
             try {
-              const pr = await github.rest.pulls.create({
-                ...context.repo,
-                title: `[FE] ${process.env.ISSUE_TITLE}`,
-                head: branchName,
-                base: 'main',
-                body: prBody
-              });
-              
-              await github.rest.issues.createComment({
-                ...context.repo,
-                issue_number: context.issue.number,
-                body: `PR: ${pr.data.html_url}\n\n新建: ${createdFiles.length} | 修改: ${modifiedFiles.length}${warnings.length > 0 ? `\n\n⚠️ ${warnings.length} 个警告，详见 PR` : ''}`
-              });
+              let pr;
+              if (existingPR) {
+                // 更新现有 PR
+                pr = await github.rest.pulls.update({
+                  ...context.repo,
+                  pull_number: existingPR.number,
+                  title: `[FE] ${process.env.ISSUE_TITLE}${parentIssueNumber ? ` (基于 #${parentIssueNumber})` : ''}`,
+                  body: prBody,
+                  state: 'open' // 确保 PR 是打开状态
+                });
+                
+                await github.rest.issues.createComment({
+                  ...context.repo,
+                  issue_number: context.issue.number,
+                  body: `✅ PR 已更新: ${pr.data.html_url}\n\n新建: ${createdFiles.length} | 修改: ${modifiedFiles.length}${warnings.length > 0 ? `\n\n⚠️ ${warnings.length} 个警告，详见 PR` : ''}\n\n📄 实施方案文档: \`frontend/lib/doc/implementation-plan-issue-${context.issue.number}.md\``
+                });
+              } else {
+                // 创建新的 Draft PR
+                pr = await github.rest.pulls.create({
+                  ...context.repo,
+                  title: `[FE] ${process.env.ISSUE_TITLE}${parentIssueNumber ? ` (基于 #${parentIssueNumber})` : ''}`,
+                  head: branchName,
+                  base: 'main',
+                  body: prBody,
+                  draft: true // 默认创建 Draft PR
+                });
+                
+                await github.rest.issues.createComment({
+                  ...context.repo,
+                  issue_number: context.issue.number,
+                  body: `✅ Draft PR 已创建: ${pr.data.html_url}\n\n新建: ${createdFiles.length} | 修改: ${modifiedFiles.length}${warnings.length > 0 ? `\n\n⚠️ ${warnings.length} 个警告，详见 PR` : ''}\n\n📄 实施方案文档: \`frontend/lib/doc/implementation-plan-issue-${context.issue.number}.md\`\n\n**请验证代码后，将 PR 标记为 Ready for Review**`
+                });
+              }
             } catch(e) {
               await github.rest.issues.createComment({
                 ...context.repo,
                 issue_number: context.issue.number,
-                body: `分支已更新: \`${branchName}\`\n\n新建: ${createdFiles.length} | 修改: ${modifiedFiles.length}`
+                body: `分支已更新: \`${branchName}\`\n\n新建: ${createdFiles.length} | 修改: ${modifiedFiles.length}\n\n📄 实施方案文档: \`frontend/lib/doc/implementation-plan-issue-${context.issue.number}.md\`\n\n⚠️ PR 创建失败: ${e.message}`
               });
             }

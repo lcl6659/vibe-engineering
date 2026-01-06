@@ -116,8 +116,9 @@ jobs:
               issue_number: context.issue.number
             });
             
-            // 识别前端规范和前端方案的标记
+            // 识别前端规范和前端方案的标记（放宽匹配，包含"规范"关键词即可）
             const frontendSpecMarkers = [
+              /规范/i,
               /前端规范/i,
               /前端约束/i,
               /frontend spec/i,
@@ -129,10 +130,9 @@ jobs:
             ];
             
             const frontendPlanMarkers = [
-              /🏗️\s*前端实施方案/i,
-              /🏗️\s*前端实施计划/i,
               /前端实施方案/i,
               /前端实施计划/i,
+              /方案/i,
               /frontend implementation plan/i,
               /frontend implementation/i
             ];
@@ -153,6 +153,63 @@ jobs:
             let frontendPlan = '';
             let branchFromComment = null; // 从评论中提取的分支信息
             const generalComments = [];
+            const referencedContent = []; // 存储引用的内容
+            
+            // 找到触发评论（包含 /code-zhangxiaohao-agent 的评论）
+            const triggerComment = comments.data.find(c => c.body.includes('/code-zhangxiaohao-agent'));
+            
+            // 直接从触发评论中提取所有链接并读取内容
+            if (triggerComment) {
+              // 匹配所有 GitHub URL
+              const urlPattern = /https:\/\/github\.com\/[^\s\)]+/g;
+              const urls = triggerComment.body.match(urlPattern) || [];
+              
+              for (const url of urls) {
+                try {
+                  console.log('📎 读取链接: ' + url);
+                  
+                  // 尝试解析 URL 类型并读取内容
+                  let content = '';
+                  let source = url;
+                  
+                  // 如果是评论链接
+                  const commentMatch = url.match(/github\.com\/([^\/]+)\/([^\/]+)\/issues\/\d+#issuecomment-(\d+)/);
+                  if (commentMatch) {
+                    const comment = await github.rest.issues.getComment({
+                      owner: commentMatch[1],
+                      repo: commentMatch[2],
+                      comment_id: parseInt(commentMatch[3])
+                    });
+                    content = comment.data.body;
+                    source = commentMatch[1] + '/' + commentMatch[2] + ' Comment';
+                  }
+                  // 如果是 Issue 链接
+                  else if (url.includes('/issues/')) {
+                    const issueMatch = url.match(/github\.com\/([^\/]+)\/([^\/]+)\/issues\/(\d+)/);
+                    if (issueMatch) {
+                      const issue = await github.rest.issues.get({
+                        owner: issueMatch[1],
+                        repo: issueMatch[2],
+                        issue_number: parseInt(issueMatch[3])
+                      });
+                      content = issue.data.body || '';
+                      source = issueMatch[1] + '/' + issueMatch[2] + ' Issue #' + issueMatch[3];
+                    }
+                  }
+                  
+                  if (content) {
+                    referencedContent.push({
+                      source: source,
+                      url: url,
+                      content: content
+                    });
+                    console.log('✅ 已读取: ' + url);
+                  }
+                } catch(e) {
+                  console.log('⚠️ 读取失败: ' + url + ' - ' + e.message);
+                }
+              }
+            }
             
             // 按时间排序（最早的在前）
             const sortedComments = comments.data.sort((a, b) => 
@@ -211,6 +268,17 @@ jobs:
             }
             if (frontendPlan) {
               contextBody += '\n\n--- [前端方案] ---\n' + frontendPlan;
+            }
+            
+            // 添加引用的内容到上下文（让 LLM 自己判断用途）
+            if (referencedContent.length > 0) {
+              contextBody += '\n\n--- [引用的内容] ---\n';
+              contextBody += '以下是触发评论中引用的其他评论内容，请根据内容判断其用途（可能是规范、方案或其他信息）：\n\n';
+              referencedContent.forEach((ref, i) => {
+                contextBody += '### 引用 ' + (i + 1) + ': ' + ref.source + '\n';
+                contextBody += '来源: ' + ref.url + '\n';
+                contextBody += '内容:\n' + ref.content + '\n\n';
+              });
             }
 
             // 2. 读取父级 issue 基本信息，如果当前 issue 没有前端规范和前端方案，则从父级 issue 的评论中提取

@@ -167,7 +167,7 @@
 /* 自定义颜色工具类 */
 .text-profit {
   color: #86EFAC;
-}
+  }
 .text-loss {
   color: #F87171;
 }
@@ -176,7 +176,7 @@
 }
 .bg-card-hover {
   background-color: #1A1A1A;
-}
+  }
 .border-card {
   border-color: #1F1F1F;
 }

@@ -630,7 +630,7 @@ jobs:
               await github.rest.issues.createComment({
                 ...context.repo,
                 issue_number: context.issue.number,
-                body: `❌ AI API 调用失败: ${errText.substring(0, 500)}`
+                body: 'AI API 调用失败: ' + errText.substring(0, 500)
               });
               throw new Error(`AI API Error: ${errText}`);
             }
@@ -640,12 +640,14 @@ jobs:
 
             // 6. 解析 AI 输出
             console.log("📦 解析文件...");
+            console.log("📄 AI 返回内容长度:", rawContent.length);
+            console.log("📄 AI 返回内容前1000字符:", rawContent.substring(0, 1000));
+            
             const files = [];
             const lines = rawContent.split('\n');
             let currentFile = null;
             let currentAction = null;
             let currentContentLines = [];
-            let inCodeBlock = false;
 
             const cleanContent = (linesArray) => {
               let content = linesArray.join('\n').trim();
@@ -666,13 +668,15 @@ jobs:
               content = content.replace(/\n{3,}/g, '\n\n');
               return content.trim();
             };
-
+            
             for (const line of lines) {
+              // 检测文件标记（MODIFY 或 CREATE）
               const modifyMatch = line.trim().match(/^###\s*MODIFY:\s*(.+)$/);
               const createMatch = line.trim().match(/^###\s*CREATE:\s*(.+)$/);
               const fileMatch = line.trim().match(/^###\s*FILE:\s*(.+)$/);
               
               if (modifyMatch || createMatch || fileMatch) {
+                // 保存上一个文件
                 if (currentFile) {
                   files.push({ 
                     path: currentFile, 
@@ -680,11 +684,13 @@ jobs:
                     action: currentAction 
                   });
                 }
+                // 开始新文件
                 currentFile = (modifyMatch || createMatch || fileMatch)[1].trim();
                 currentAction = modifyMatch ? 'MODIFY' : (createMatch ? 'CREATE' : 'UNKNOWN');
                 currentContentLines = [];
-                inCodeBlock = false;
-              } else {
+                console.log(`发现文件: ${currentAction} ${currentFile}`);
+              } else if (currentFile) {
+                // 收集文件内容
                 currentContentLines.push(line);
               }
             }
@@ -698,10 +704,20 @@ jobs:
             }
 
             if (files.length === 0) {
+              // 输出更多调试信息
+              const debugInfo = 'AI 未生成有效的文件块。\n\n' +
+                '调试信息：\n' +
+                '- AI 返回内容长度: ' + rawContent.length + '\n' +
+                '- 是否检测到 MODIFY 标记: ' + (rawContent.includes('### MODIFY:') ? '是' : '否') + '\n' +
+                '- 是否检测到 CREATE 标记: ' + (rawContent.includes('### CREATE:') ? '是' : '否') + '\n\n' +
+                'AI 返回内容前2000字符：\n' +
+                rawContent.substring(0, 2000) + '\n\n' +
+                '请检查需求描述是否清晰，或检查 AI 是否按照 prompt 格式输出代码文件。';
+              
               await github.rest.issues.createComment({
                 ...context.repo,
                 issue_number: context.issue.number,
-                body: `❌ AI 未生成有效的文件块，请检查需求描述是否清晰。`
+                body: debugInfo
               });
               throw new Error("解析失败：AI 未生成任何有效文件块");
             }
@@ -762,7 +778,7 @@ jobs:
             try {
               await github.rest.git.getRef({ ...context.repo, ref: `heads/${branchName}` });
               branchExists = true;
-              console.log(`✅ 分支已存在: ${branchName}`);
+              console.log(`分支已存在: ${branchName}`);
             } catch (e) {
               // 分支不存在，创建新分支
               try {
@@ -771,9 +787,9 @@ jobs:
                   ref: `refs/heads/${branchName}`, 
                   sha: baseRef.data.object.sha 
                 });
-                console.log(`✅ 创建新分支: ${branchName}`);
+                console.log(`创建新分支: ${branchName}`);
               } catch (e2) {
-                console.log(`⚠️ 创建分支失败: ${e2.message}`);
+                console.log(`创建分支失败: ${e2.message}`);
               }
             }
 
@@ -781,7 +797,7 @@ jobs:
             const modifiedFiles = [];
             
             for (const file of validFiles) {
-              console.log(`📝 ${file.action}: ${file.path}`);
+              console.log(`${file.action}: ${file.path}`);
               
               let sha;
               try {
@@ -810,7 +826,7 @@ jobs:
             }
 
             // 9. 创建 PR
-            let prBody = '### 📦 变更清单\n\n';
+            let prBody = '###  变更清单\n\n';
             if (createdFiles.length > 0) {
               prBody += '**新建文件：**\n' + createdFiles.map(f => '- `' + f + '`').join('\n') + '\n';
             }
@@ -818,7 +834,7 @@ jobs:
               prBody += '**修改文件：**\n' + modifiedFiles.map(f => '- `' + f + '`').join('\n') + '\n';
             }
             if (warnings.length > 0) {
-              prBody += '\n### ⚠️ 警告\n' + warnings.map(w => '- ' + w).join('\n');
+              prBody += '\n### 警告\n' + warnings.map(w => '- ' + w).join('\n');
             }
             prBody += '\n\n---\n指令: `/code-zhangxiaohao-agent`\nIssue: #' + context.issue.number;
 

@@ -2,44 +2,35 @@ name: PR Auto Review with Claude
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+    # 必须增加 labeled，这样你打标签时才会触发
+    types: [opened, synchronize, reopened, labeled]
 
 jobs:
   review:
+    # 只有带 'claude-review' 标签时运行
     if: contains(github.event.pull_request.labels.*.name, 'claude-review')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
-      id-token: write # 添加 OIDC token 权限
+      id-token: write
     steps:
-      - name: Checkout Testing Branch
-        uses: actions/checkout@v6
+      - name: Checkout PR Branch
+        uses: actions/checkout@v5 # 严格遵循固定标准：v5 [cite: 2026-01-06]
         with:
-          ref: "claude-code/auto-coding"
-          fetch-depth: 0
+          fetch-depth: 0 # 不指定 ref，自动适配当前 PR 分支
 
       - name: Run Claude Code Action
         uses: anthropics/claude-code-action@v1
         env:
-          # OpenRouter 集成配置（参考：https://openrouter.ai/docs/guides/guides/claude-code-integration）
           ANTHROPIC_BASE_URL: https://openrouter.ai/api
         with:
-          # 使用 OpenRouter API key（文档要求使用 anthropic_api_key）
+          # 固定标准配置
           anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          # 使用 GitHub token 避免 OIDC token 获取失败
           github_token: ${{ github.token }}
           track_progress: true
           prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
-
-            请全面、智能地审查这个 Pull Request，重点关注以下方面：
-            - 代码质量、可读性、最佳实践
-            - 潜在 bug 或逻辑错误
-            - 安全隐患（注入、泄露、权限等）
-            - 性能优化建议
-            - 测试覆盖完整性
-            - 文档与注释是否齐全
-
-            请使用内联评论指出具体问题，并在 PR 顶部发布结构化总结评论。
+            I need you to review this PR #${{ github.event.pull_request.number }}.
+            1. 请全面审查代码质量、逻辑错误和安全隐患。
+            2. 严禁使用 nano 编辑器 [cite: 2026-01-05]。
+            3. 请直接在 PR 的 Diff 处留下内联评论。

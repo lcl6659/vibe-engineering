@@ -1,56 +1,55 @@
-name: PR Checklist Review
+name: PR Checklist Review with Claude
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, ready_for_review]
+    if: contains(github.event.pull_request.labels.*.name, 'claude-checklist')
 
 jobs:
   checklist:
-    # if 应该放在这里，属于 job 的属性
-    if: contains(github.event.pull_request.labels.*.name, 'checklist')
+    if: contains(github.event.pull_request.labels.*.name, 'claude-checklist')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
+      - name: Checkout Testing Branch
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 1
+          ref: 'claude-code/auto-coding'
+          fetch-depth: 0
 
       - name: Run Claude Code Action
         uses: anthropics/claude-code-action@v1
         env:
-          # OpenRouter 转发地址
           ANTHROPIC_BASE_URL: https://openrouter.ai/api
         with:
-          # 修正为官方要求的参数名 anthropic_api_key
-          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: anthropic/claude-sonnet-4.5
+          track_progress: true
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
-            请按照团队检查清单审查这个 PR，并在 PR 上发布带打勾的总结：
-            
+
+            请严格按照团队代码规范检查清单审查这个 PR，并在 PR 顶部发布带 ✅/❌ 的总结评论：
+
             ## Code Quality
-            - [ ] 遵循风格指南
-            - [ ] 无注释掉的代码
-            - [ ] 变量命名有意义
-            - [ ] 遵循 DRY 原则
-            
+            - [ ] 遵循 Go/React 风格指南
+            - [ ] 无废弃或注释掉的代码
+            - [ ] 变量/函数命名清晰有意义
+            - [ ] 代码遵循 DRY 原则
+
             ## Testing
-            - [ ] 新功能有单元测试
-            - [ ] 新接口有集成测试
-            - [ ] 覆盖边缘情况
-            - [ ] 测试覆盖率 > 80%
-            
+            - [ ] 新功能有对应单元测试
+            - [ ] 关键接口有集成/E2E 测试
+            - [ ] 覆盖主要边缘情况
+
             ## Documentation
-            - [ ] README 如需更新已更新
-            - [ ] API 文档已同步
-            - [ ] 复杂逻辑有内联注释
-            
-            ## Security
-            - [ ] 无硬编码凭证
+            - [ ] README 或 API 文档已同步更新
+            - [ ] 复杂逻辑有必要内联注释
+
+            ## Security & Performance
+            - [ ] 无硬编码密钥或敏感信息
             - [ ] 输入验证完整
-            - [ ] 错误处理安全
-          # 这里的参数名根据不同 Action 版本可能为 claude_args 或直接支持
-          claude_args: "--allowedTools 'Read,Edit,Grep,LS,Bash(gh:*)'"
+            - [ ] 无明显性能瓶颈
+          allowed_tools: '["github:inline_comment", "github:comment_on_pr"]'

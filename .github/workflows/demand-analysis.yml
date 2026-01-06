@@ -6,7 +6,12 @@ on:
 
 jobs:
   analyze:
-    if: contains(github.event.issue.labels.*.name, 'claude-tech')
+    # 只在添加 'claude-tech' 标签时触发，避免与其他工作流冲突
+    # 如果是 opened 事件，检查是否有 claude-tech 标签
+    # 如果是 labeled 事件，检查新添加的标签是否为 claude-tech
+    if: |
+      (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'claude-tech')) ||
+      (github.event.action == 'labeled' && github.event.label.name == 'claude-tech')
     runs-on: ubuntu-latest
     permissions:
       issues: write

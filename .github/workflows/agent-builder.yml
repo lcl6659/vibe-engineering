@@ -1,4 +1,4 @@
-name: Agent Builder (Frontend Only)
+name: Agent Builder (Frontend Strict)
 
 on:
   issue_comment:
@@ -18,12 +18,23 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # ✨ 新增步骤：让 Builder 也看一眼目录，防止路径瞎写
+      - name: Generate File Tree
+        id: file_tree
+        run: |
+          # 排除干扰项，只看关键的前端目录
+          TREE=$(find . -maxdepth 5 -not -path '*/.*' -not -path '*/node_modules*' -not -path '*/dist*' -not -path '*/build*' -not -path '*/.next*' | sed 's|./||' | sort)
+          echo "TREE<<EOF" >> $GITHUB_ENV
+          echo "$TREE" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
       - name: Execute Frontend Implementation
         uses: actions/github-script@v7
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
+          PROJECT_TREE: ${{ env.TREE }} # 传入目录结构
         with:
           script: |
             // 1. 获取历史评论 (读取架构师的前端方案)
@@ -37,7 +48,7 @@ jobs:
               .map(c => `[User: ${c.user.login}]:\n${c.body}`)
               .join("\n\n--- 历史分割线 ---\n\n");
 
-            // 2. 读取父级规范 (仅作为上下文参考)
+            // 2. 读取父级规范
             let contextBody = process.env.ISSUE_BODY;
             const parentRegex = /(?:Parent|Ref|父任务|父级|父需求|关联父需求)[\s:：]+#(\d+)/i;
             const parentMatch = contextBody.match(parentRegex);
@@ -45,53 +56,73 @@ jobs:
             if (parentMatch) {
                try {
                  const p = await github.rest.issues.get({ ...context.repo, issue_number: parentMatch[1] });
-                 contextBody += `\n\n--- [父级规范] ---\n${p.data.body}`;
+                 contextBody += `\n\n--- [父级规范 (严格遵守)] ---\n${p.data.body}`;
                } catch(e) {}
             }
 
-            // 3. 构建 "纯前端" Prompt
+            // 3. 读取 package.json (让 AI 知道当前有哪些包)
+            let packageJsonContext = "package.json not found";
+            try {
+               const { data: pkgData } = await github.rest.repos.getContent({
+                 ...context.repo,
+                 path: 'frontend/package.json' // 假设前端在 frontend 目录下，如果不是请按需调整
+               });
+               packageJsonContext = Buffer.from(pkgData.content, 'base64').toString();
+            } catch(e) {
+               console.log("⚠️ 未找到 frontend/package.json，尝试根目录查找...");
+               try {
+                 const { data: rootPkg } = await github.rest.repos.getContent({ ...context.repo, path: 'package.json' });
+                 packageJsonContext = Buffer.from(rootPkg.content, 'base64').toString();
+               } catch(e2) {}
+            }
+
+            // 4. 构建 Prompt
             const prompt = `你是一名 **纯粹的前端工程师 (Next.js Expert)**。
-            你的工作是：只看架构师方案中的 **前端部分**，忽略一切后端/数据库/DevOps 内容。
             
+            【真实环境信息 (不要瞎猜路径)】
+            1. **当前目录结构**：
+            ${process.env.PROJECT_TREE}
+            
+            2. **当前 package.json**：
+            ${packageJsonContext}
+
             【需求来源】
             标题：${process.env.ISSUE_TITLE}
             描述：${contextBody}
 
-            【架构师方案与讨论】
+            【架构师方案】
             ${discussionHistory}
 
             【你的任务】
             编写前端代码文件。
 
-            【🔥 核心规则】
-            1. **只做前端**：只生成 .tsx, .ts, .css, .json (package.json) 文件。看到 .go, .sql, Dockerfile 等后端文件请直接忽略，不要生成。
-            2. **路由目录 (Next.js)**：
-               - 如果需要创建新页面，**必须**创建包含路由的目录结构（如 \`frontend/app/notes/[id]/page.tsx\`）。
-               - 严禁把页面逻辑写在 components 里而不创建 page.tsx。
-            3. **复用**：如果父级规范或架构方案里提到了现有的 API 路径（如 /api/v1/user），请直接在 fetch 中使用该路径，但不要去实现这个 API。
+            【🔥 核心规则 (必须严格执行)】
+            1. **路径一致性**：请仔细比对【当前目录结构】。如果现有组件在 \`frontend/components/ui\`, 请不要创建 \`src/components/ui\`。必须复用现有目录！
+            2. **依赖管理**：
+               - 如果你使用了新的 npm 包（如 lodash, dayjs, framer-motion），**必须** 修改 \`package.json\` 并将其完整输出。
+               - 不要只给安装命令，直接更新 package.json 文件内容。
+            3. **纯前端**：只生成 .tsx, .ts, .css, .json。忽略后端文件。
+            4. **格式控制**：
+               - 代码内容 **不要** 包含 Markdown 的 \`\`\`typescript 标记。直接输出纯代码。
+               - 如果你为了排版加了 \`\`\`，脚本会自动删除第一行和最后一行，请知悉。
 
             【输出格式】
-            ❌ 不要返回 JSON。
-            ✅ 请使用分隔符格式：
+            请使用严格的分隔符格式：
 
-            ### FILE: frontend/app/login/page.tsx
-            \`\`\`typescript
-            (代码...)
-            \`\`\`
+            ### FILE: frontend/app/notes/[id]/page.tsx
+            (这里直接写 import ... 不要加 \`\`\` 符号)
+            (代码内容)
 
-            ### FILE: frontend/components/ui/button.tsx
-            \`\`\`typescript
-            (代码...)
-            \`\`\`
-
-            【约束】
-            1. 交互组件首行必须是 "use client";
-            2. 使用 Tailwind CSS。
+            ### FILE: frontend/package.json
+            (这里直接写完整的新 json 内容，不要加 \`\`\`)
+            {
+              "name": "...",
+              "dependencies": { ... }
+            }
             `;
 
             console.log("🤖 正在编写前端代码 (OpenRouter AI)...");
 
-            // 4. 调用 AI
             const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
               method: 'POST',
               headers: {
@@ -108,42 +139,57 @@ jobs:
             const aiData = await aiRes.json();
             const rawContent = aiData.choices[0].message.content;
 
-            // 5. 解析分隔符格式
+            // 5. 解析分隔符格式 (🔥 增强版清洗逻辑)
             console.log("📦 解析文件...");
             const files = [];
             const lines = rawContent.split('\n');
             let currentFile = null;
             let currentContentLines = [];
 
+            // 辅助函数：清洗代码块标记
+            const cleanContent = (linesArray) => {
+                let content = linesArray.join('\n').trim();
+                // 如果 AI 还是不听话加了 ```，我们暴力去除
+                if (content.startsWith('```')) {
+                    content = content.split('\n').slice(1).join('\n'); // 去头
+                }
+                if (content.endsWith('```')) {
+                     // 这里的逻辑要小心，防止去掉正常的代码。通常 AI 的 ``` 是独占一行的
+                     const tempLines = content.split('\n');
+                     if (tempLines[tempLines.length-1].trim().startsWith('```')) {
+                         content = tempLines.slice(0, -1).join('\n'); // 去尾
+                     }
+                }
+                return content.trim();
+            };
+
             for (const line of lines) {
               if (line.trim().startsWith('### FILE:')) {
                 if (currentFile) {
                   files.push({ 
                     path: currentFile, 
-                    content: currentContentLines.join('\n').replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim() 
+                    content: cleanContent(currentContentLines)
                   });
                 }
                 currentFile = line.replace('### FILE:', '').trim();
                 currentContentLines = [];
               } else {
-                if (currentFile) {
-                  currentContentLines.push(line);
-                }
+                currentContentLines.push(line);
               }
             }
             if (currentFile) {
               files.push({ 
                 path: currentFile, 
-                content: currentContentLines.join('\n').replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim() 
+                content: cleanContent(currentContentLines)
               });
             }
 
             if (files.length === 0) {
               console.log("原始内容:", rawContent);
-              throw new Error("AI 未生成任何文件，可能是因为Prompt过滤太严或格式错误");
+              throw new Error("AI 未生成任何文件，可能是 Prompt 格式未被遵守");
             }
 
-            // 6. Git 提交 (使用 zhangxiaohao 分支名)
+            // 6. Git 提交
             const branchName = `zhangxiaohao/issue-${context.issue.number}`;
             const baseRef = await github.rest.git.getRef({ ...context.repo, ref: 'heads/main' });
             
@@ -158,13 +204,15 @@ jobs:
             }
 
             for (const file of files) {
-              // 二次保险：如果 AI 还是发疯生成了 .go 文件，前端 Agent 拒绝写入
+              // 再次过滤后端文件
               if (file.path.endsWith('.go') || file.path.includes('backend/')) {
-                  console.log(`⚠️ 跳过后端文件: ${file.path} (我是前端 Agent)`);
+                  console.log(`⚠️ 跳过后端文件: ${file.path}`);
                   continue;
               }
 
-              console.log(`📝 写入前端文件: ${file.path}`);
+              console.log(`📝 写入文件: ${file.path}`);
+              
+              // 获取 sha 以便更新
               let sha;
               try {
                 const { data } = await github.rest.repos.getContent({ 
@@ -178,7 +226,7 @@ jobs:
               await github.rest.repos.createOrUpdateFileContents({
                 ...context.repo,
                 path: file.path,
-                message: `feat(fe): ${file.path}`,
+                message: `feat(fe): update ${file.path}`,
                 content: Buffer.from(file.content).toString('base64'),
                 branch: branchName,
                 sha: sha
@@ -188,20 +236,20 @@ jobs:
             try {
               const pr = await github.rest.pulls.create({
                 ...context.repo,
-                title: `✨ [Frontend] ${process.env.ISSUE_TITLE}`,
+                title: `✨ [FE] ${process.env.ISSUE_TITLE}`,
                 head: branchName,
                 base: 'main',
-                body: `🤖 **前端代码已就绪**\n\n指令: \`/code-zhangxiaohao-agent\`\n只包含前端实现，后端逻辑已自动过滤。\n\n### 文件列表：\n${files.map(f => `- \`${f.path}\``).join('\n')}`
+                body: `🤖 **前端代码生成**\n\n指令: \`/code-zhangxiaohao-agent\`\n\n### 📦 交付清单：\n${files.map(f => `- \`${f.path}\``).join('\n')}\n\n注意：如果有 package.json 变动，请在本地运行 npm install。`
               });
               await github.rest.issues.createComment({
                 ...context.repo,
                 issue_number: context.issue.number,
-                body: `✅ **前端代码生成完毕！**\nPR: ${pr.data.html_url}`
+                body: `✅ **代码已生成！**\nPR: ${pr.data.html_url}`
               });
             } catch (e) {
               await github.rest.issues.createComment({
                 ...context.repo,
                 issue_number: context.issue.number,
-                body: `✅ **代码已更新到现有分支！**`
+                body: `✅ **代码已更新到分支！**`
               });
             }

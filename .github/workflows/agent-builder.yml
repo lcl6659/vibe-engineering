@@ -26,19 +26,18 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
         with:
           script: |
-            // 1. 获取 Issue 下的所有评论（为了找到架构师的方案）
+            // 1. 获取 Issue 下的所有评论
             console.log("📥 正在读取历史评论(架构方案)...");
             const comments = await github.rest.issues.listComments({
               ...context.repo,
               issue_number: context.issue.number
             });
             
-            // 找到所有评论的文本，拼接给 AI 做上下文
             const discussionHistory = comments.data
               .map(c => `[User: ${c.user.login} 说]:\n${c.body}`)
               .join("\n\n--- 历史讨论分割线 ---\n\n");
 
-            // 2. 尝试读取父级需求
+            // 2. 读取父级需求
             let contextBody = process.env.ISSUE_BODY;
             const parentRegex = /(?:Parent|Ref|父任务|父级|父需求|关联父需求)[\s:：]+#(\d+)/i;
             const parentMatch = contextBody.match(parentRegex);
@@ -49,44 +48,44 @@ jobs:
                try {
                  const p = await github.rest.issues.get({ ...context.repo, issue_number: parentId });
                  contextBody += `\n\n--- [父级规范 (Issue #${parentId})] ---\n${p.data.body}`;
-               } catch(e) {
-                 console.log(`⚠️ 读取父级失败: ${e.message}`);
-               }
+               } catch(e) { console.log("⚠️ 读取父级失败"); }
             }
 
-            // 3. 构建 Prompt
+            // 3. 构建 Prompt (🔥 修改点：抛弃 JSON，改用分隔符格式)
             const prompt = `你是一名高级全栈工程师 (Next.js & Go)。
             
             【需求来源】
             标题：${process.env.ISSUE_TITLE}
-            原始描述：${contextBody}
+            描述：${contextBody}
 
-            【架构师规划与讨论历史】
-            **请重点阅读下方的 "实施方案"，严格按照架构师指定的路径生成代码：**
+            【架构师方案与讨论】
             ${discussionHistory}
 
             【你的任务】
-            编写具体的代码实现文件。
+            编写代码。严格遵守架构师指定的路径。
             
-            【严格约束】
-            1. **路径服从**：严格按照架构师方案里的路径。如果架构师说 "放在 components/ui"，你就不能放在 "components/common"。
-            2. **代码完整**：输出完整的代码文件（包含 import, export, "use client" 等），不要使用省略号。
-            3. **格式**：你必须只返回一个 JSON 对象，不要包含 Markdown 标记。
-            4. **技术栈**：Next.js App Router, Tailwind CSS, TypeScript。
-            
-            【输出 JSON 格式】
-            {
-              "files": [
-                {
-                  "path": "frontend/app/page.tsx",
-                  "content": "\"use client\";\nimport..."
-                }
-              ]
-            }`;
+            【输出格式 - 极其重要】
+            ❌ **不要返回 JSON！** JSON 处理长代码会失败。
+            ✅ **请使用以下分隔符格式返回：**
+
+            ### FILE: frontend/app/page.tsx
+            \`\`\`typescript
+            (这里是代码内容...)
+            \`\`\`
+
+            ### FILE: backend/main.go
+            \`\`\`go
+            (这里是代码内容...)
+            \`\`\`
+
+            【约束】
+            1. 必须包含 import/export 和完整逻辑。
+            2. 如果是 Next.js 交互组件，第一行必须是 "use client";
+            `;
 
             console.log("🤖 正在编写代码 (OpenRouter AI)...");
 
-            // 4. 调用 AI 生成代码
+            // 4. 调用 AI
             const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
               method: 'POST',
               headers: {
@@ -95,58 +94,81 @@ jobs:
               },
               body: JSON.stringify({
                 model: "anthropic/claude-3.5-sonnet",
-                messages: [{ role: "user", content: prompt }],
-                response_format: { type: "json_object" }
+                messages: [{ role: "user", content: prompt }]
               })
             });
             
-            if (!aiRes.ok) {
-                const err = await aiRes.text();
-                throw new Error(`AI API Error: ${err}`);
-            }
-
+            if (!aiRes.ok) throw new Error(`AI API Error: ${await aiRes.text()}`);
             const aiData = await aiRes.json();
-            
-            // 清洗 Markdown 标记 (防止 AI 虽然被要求 JSON 但还是加了 ```json)
-            let contentStr = aiData.choices[0].message.content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-            
-            let files;
-            try {
-                files = JSON.parse(contentStr).files;
-                if (!files || files.length === 0) throw new Error("No files returned from AI");
-            } catch (e) {
-                console.error("AI 返回内容:", contentStr);
-                throw new Error("JSON 解析失败，AI 可能没返回正确的 JSON 格式");
+            const rawContent = aiData.choices[0].message.content;
+
+            // 5. 解析分隔符格式 (🔥 修改点：稳健的解析逻辑)
+            console.log("📦 解析 AI 返回内容...");
+            const files = [];
+            const lines = rawContent.split('\n');
+            let currentFile = null;
+            let currentContentLines = [];
+
+            for (const line of lines) {
+              if (line.trim().startsWith('### FILE:')) {
+                // 保存上一个文件
+                if (currentFile) {
+                  files.push({ 
+                    path: currentFile, 
+                    // 去掉首尾可能存在的 ``` 标记
+                    content: currentContentLines.join('\n').replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim() 
+                  });
+                }
+                // 开始新文件
+                currentFile = line.replace('### FILE:', '').trim();
+                currentContentLines = [];
+              } else {
+                if (currentFile) {
+                  currentContentLines.push(line);
+                }
+              }
+            }
+            // 保存最后一个文件
+            if (currentFile) {
+              files.push({ 
+                path: currentFile, 
+                content: currentContentLines.join('\n').replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim() 
+              });
             }
 
-            console.log(`📦 生成了 ${files.length} 个文件，准备提交...`);
+            if (files.length === 0) {
+              console.log("原始内容:", rawContent);
+              throw new Error("未能解析出任何文件，请检查 AI 返回格式");
+            }
 
-            // 5. Git 提交与 PR 流程
-            const branchName = `zhangxiaohao/feature-${context.issue.number}-${Date.now()}`;
-            
-            // 获取 main 分支最新 SHA (如果你的主分支叫 master，请把下面的 'main' 改为 'master')
+            console.log(`📦 解析成功，准备提交 ${files.length} 个文件`);
+
+            // 6. Git 提交与 PR
+            // 格式示例: zhangxiaohao/issue-123
+            const branchName = `zhangxiaohao/issue-${context.issue.number}`;
             const baseRef = await github.rest.git.getRef({ ...context.repo, ref: 'heads/main' });
             
-            // 创建新分支
-            await github.rest.git.createRef({ 
-                ...context.repo, 
-                ref: `refs/heads/${branchName}`, 
-                sha: baseRef.data.object.sha 
-            });
+            try {
+                await github.rest.git.createRef({ 
+                    ...context.repo, 
+                    ref: `refs/heads/${branchName}`, 
+                    sha: baseRef.data.object.sha 
+                });
+            } catch (e) {
+                console.log("ℹ️ 分支已存在，将直接更新...");
+            }
 
-            // 循环写入文件
             for (const file of files) {
               console.log(`📝 写入: ${file.path}`);
               let sha;
               try {
-                // 检查文件是否存在（用于更新）
                 const { data } = await github.rest.repos.getContent({ 
                     ...context.repo, 
                     path: file.path, 
                     ref: branchName 
                 });
                 sha = data.sha;
-              } catch (e) {} // 文件不存在则 sha 为 undefined
+              } catch (e) {} 
 
               await github.rest.repos.createOrUpdateFileContents({
                 ...context.repo,
@@ -159,17 +181,24 @@ jobs:
             }
 
             // 创建 PR
-            const pr = await github.rest.pulls.create({
-              ...context.repo,
-              title: `✨ [AI Impl] ${process.env.ISSUE_TITLE}`,
-              head: branchName,
-              base: 'main',
-              body: `🤖 **Code Generated by Agent Builder**\n\n指令: \`/code-zhangxiaohao-agent\`\n基于架构师方案自动生成。\n\n### 包含文件：\n${files.map(f => `- \`${f.path}\``).join('\n')}`
-            });
-            
-            // 回复 Issue
-            await github.rest.issues.createComment({
-              ...context.repo,
-              issue_number: context.issue.number,
-              body: `✅ **代码生成完毕！**\n请查看 PR 进行代码审查: ${pr.data.html_url}`
-            });
+            try {
+              const pr = await github.rest.pulls.create({
+                ...context.repo,
+                title: `✨ [Impl] ${process.env.ISSUE_TITLE}`,
+                head: branchName,
+                base: 'main',
+                body: `🤖 **代码生成完毕**\n\n指令: \`/code-zhangxiaohao-agent\`\n\n### 修改文件：\n${files.map(f => `- \`${f.path}\``).join('\n')}`
+              });
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body: `✅ **代码已生成！**\nPR: ${pr.data.html_url}`
+              });
+            } catch (e) {
+              // 如果 PR 已存在，只回复
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body: `✅ **代码已更新到现有分支！**\n请查看代码变动。`
+              });
+            }

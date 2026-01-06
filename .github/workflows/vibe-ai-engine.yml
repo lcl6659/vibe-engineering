@@ -5,11 +5,12 @@ on:
     types: [labeled]
     # ✅ 直接在 workflow 层面过滤标签
     labels: ['🛠 tech']
+    if: github.event.label.name == '🛠 tech'
 
 jobs:
   tech-arch:
     # 只有打上 🛠 tech 标签时才运行，避免与 PM 机器人冲突
-    # if: github.event.label.name == '🛠 tech'
+    if: github.event.label.name == '🛠 tech'
     runs-on: ubuntu-latest
     permissions:
       issues: write

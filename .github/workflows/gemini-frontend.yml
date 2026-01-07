@@ -179,6 +179,23 @@ jobs:
               - Tailwind CSS
               
               ====================
+              PATH CONSTRAINTS (STRICT - NO EXCEPTIONS)
+              ====================
+              ALL file paths MUST start with "frontend/"
+              You CANNOT create files outside the frontend/ directory.
+              You CANNOT create files in backend/, root, or any other directory.
+              
+              Examples:
+              - ✅ "frontend/app/page.tsx"
+              - ✅ "frontend/components/ui/button.tsx"
+              - ❌ "app/page.tsx" (REJECTED - outside frontend/)
+              - ❌ "components/button.tsx" (REJECTED - outside frontend/)
+              - ❌ "backend/api/handler.go" (REJECTED - backend files not allowed)
+              - ❌ "../frontend/app/page.tsx" (REJECTED - path traversal not allowed)
+              
+              ONLY files inside frontend/ directory are allowed.
+              
+              ====================
               OUTPUT FORMAT (MANDATORY)
               ====================
               Return ONLY valid JSON in this exact shape:
@@ -186,7 +203,7 @@ jobs:
               {
                 "files": [
                   {
-                    "path": "relative/path/to/file.tsx",
+                    "path": "frontend/relative/path/to/file.tsx",
                     "content": "full file content"
                   }
                 ]
@@ -252,16 +269,64 @@ jobs:
                 throw new Error("Model output is not valid JSON.");
               }
 
-              // 6. Write files
+              // 6. Write files with path validation
               const generatedFiles = [];
+              const fileChanges = {
+                created: [],
+                modified: [],
+                errors: []
+              };
+              
               for (const file of parsed.files) {
-                const fullPath = path.join(process.cwd(), file.path);
-                fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-                fs.writeFileSync(fullPath, file.content, "utf8");
-                generatedFiles.push(file.path);
+                // 6.1 Validate path - STRICT: ONLY frontend/ directory allowed
+                let normalizedPath = file.path.trim();
+                
+                // Remove leading slash if present
+                if (normalizedPath.startsWith("/")) {
+                  normalizedPath = normalizedPath.substring(1);
+                }
+                
+                // STRICT CHECK: Path MUST start with "frontend/" - NO AUTO-FIX
+                if (!normalizedPath.startsWith("frontend/")) {
+                  fileChanges.errors.push(`路径被拒绝: ${file.path} - 只允许在 frontend/ 目录下创建文件`);
+                  continue;
+                }
+                
+                // Prevent path traversal attacks (even within frontend/)
+                if (normalizedPath.includes("../") || normalizedPath.includes("..\\")) {
+                  fileChanges.errors.push(`路径不安全: ${file.path} - 不允许使用路径遍历`);
+                  continue;
+                }
+                
+                // Additional check: ensure normalized path is still within frontend/
+                // This prevents paths like "frontend/../../other-dir/file"
+                const pathParts = normalizedPath.split(path.sep);
+                if (pathParts[0] !== "frontend" || pathParts.includes("..")) {
+                  fileChanges.errors.push(`路径无效: ${file.path} - 必须在 frontend/ 目录内`);
+                  continue;
+                }
+                
+                const fullPath = path.join(process.cwd(), normalizedPath);
+                
+                // Check if file already exists
+                const fileExists = fs.existsSync(fullPath);
+                
+                try {
+                  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+                  fs.writeFileSync(fullPath, file.content, "utf8");
+                  generatedFiles.push(normalizedPath);
+                  
+                  if (fileExists) {
+                    fileChanges.modified.push(normalizedPath);
+                  } else {
+                    fileChanges.created.push(normalizedPath);
+                  }
+                } catch (error) {
+                  fileChanges.errors.push(`写入失败: ${normalizedPath} - ${error.message}`);
+                }
               }
 
-              // 6.1 Analyze completion status
+              // 6.1 Analyze completion status (before recording changelog)
               const completionPrompt = `请分析以下内容，对比待办清单和实际完成情况。
 
               待办清单:
@@ -311,6 +376,76 @@ jobs:
                   completionStatus.completed = analysisResult.todolist;
                   completionStatus.summary = "代码已生成";
                 }
+              }
+
+              // 6.2 Record changes to changelog
+              const changelogPath = path.join(process.cwd(), "frontend/AGENT_CHANGELOG.md");
+              const timestamp = new Date().toISOString();
+              const changelogEntry = [
+                `## ${timestamp} - Issue #${issue_number}`,
+                "",
+                `**UI Spec:** ${commentUrl}`,
+                userInstructions ? `**用户指令:** ${userInstructions}` : "",
+                "",
+                "### 📝 需求分析",
+                analysisResult.analysis || "需求分析完成",
+                "",
+                "### ✅ 已完成",
+                completionStatus.completed.length > 0
+                  ? completionStatus.completed.map(item => `- ${item}`).join("\n")
+                  : "- 代码已生成",
+                "",
+                completionStatus.notCompleted.length > 0 ? [
+                  "### ❌ 未完成",
+                  completionStatus.notCompleted.map(item => `- ${item}`).join("\n"),
+                  ""
+                ].join("\n") : "",
+                "### 📁 文件变更",
+                "",
+                `**新建文件 (${fileChanges.created.length}):**`,
+                fileChanges.created.length > 0
+                  ? fileChanges.created.map(f => `- \`${f}\``).join("\n")
+                  : "- 无",
+                "",
+                `**修改文件 (${fileChanges.modified.length}):**`,
+                fileChanges.modified.length > 0
+                  ? fileChanges.modified.map(f => `- \`${f}\``).join("\n")
+                  : "- 无",
+                "",
+                fileChanges.errors.length > 0 ? [
+                  `**错误 (${fileChanges.errors.length}):**`,
+                  fileChanges.errors.map(e => `- ⚠️ ${e}`).join("\n"),
+                  ""
+                ].join("\n") : "",
+                "---",
+                ""
+              ].join("\n");
+              
+              // Read existing changelog or create new one
+              let changelogContent = "";
+              if (fs.existsSync(changelogPath)) {
+                changelogContent = fs.readFileSync(changelogPath, "utf8");
+              } else {
+                changelogContent = [
+                  "# Frontend Agent 变更日志",
+                  "",
+                  "此文件由 Frontend Agent 自动生成和维护，记录所有代码变更历史。",
+                  "",
+                  "---",
+                  ""
+                ].join("\n");
+              }
+              
+              // Prepend new entry
+              const updatedChangelog = changelogEntry + changelogContent;
+              fs.writeFileSync(changelogPath, updatedChangelog, "utf8");
+              
+              // Add changelog to generated files if it's new or modified
+              if (!generatedFiles.includes("frontend/AGENT_CHANGELOG.md")) {
+                generatedFiles.push("frontend/AGENT_CHANGELOG.md");
+                fileChanges.created.push("frontend/AGENT_CHANGELOG.md");
+              } else if (!fileChanges.modified.includes("frontend/AGENT_CHANGELOG.md")) {
+                fileChanges.modified.push("frontend/AGENT_CHANGELOG.md");
               }
 
               // 7. Commit changes
@@ -370,11 +505,31 @@ jobs:
                     completionStatus.notCompleted.map(item => `- ${item}`).join("\n"),
                     ""
                   ].join("\n") : "",
-                  "**📁 生成的文件:**",
-                  generatedFiles.map(f => `- \`${f}\``).join("\n"),
+                  "**📁 文件变更:**",
+                  "",
+                  `**新建 (${fileChanges.created.length}):**`,
+                  fileChanges.created.length > 0
+                    ? fileChanges.created.map(f => `- \`${f}\``).join("\n")
+                    : "- 无",
+                  "",
+                  `**修改 (${fileChanges.modified.length}):**`,
+                  fileChanges.modified.length > 0
+                    ? fileChanges.modified.map(f => `- \`${f}\``).join("\n")
+                    : "- 无",
+                  "",
+                  fileChanges.errors.length > 0 ? [
+                    "**⚠️ 错误:**",
+                    fileChanges.errors.map(e => `- ${e}`).join("\n"),
+                    ""
+                  ].join("\n") : "",
+                  "**📝 变更日志:**",
+                  `所有变更已记录到 \`frontend/AGENT_CHANGELOG.md\``,
                   "",
                   "---",
                   "Notes:",
+                  "- ✅ 严格路径约束：所有文件仅在 `frontend/` 目录下",
+                  "- ✅ 禁止在 `frontend/` 目录外创建任何文件",
+                  "- ✅ 变更历史已记录到 `frontend/AGENT_CHANGELOG.md`",
                   "- Frontend code generated and committed",
                   "- UI spec respected strictly",
                   "- No persistence added"
@@ -383,4 +538,3 @@ jobs:
             }
 
             await runFrontendAgent();
-

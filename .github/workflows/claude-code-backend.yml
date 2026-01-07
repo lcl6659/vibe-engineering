@@ -33,7 +33,6 @@ jobs:
             const fs = require("fs");
             const path = require("path");
             const { execSync } = require("child_process");
-            const core = require("@actions/core");
 
             async function runBackendAgent() {
               const { owner, repo } = context.repo;
@@ -357,62 +356,62 @@ jobs:
               // 8. Prepare prompt for anthropics/claude-code-action@v1
               const backendPrompt = `You are the Backend Execution Agent.
 
-              RULES:
-              - Follow API contract strictly
-              - Do not infer UI behavior
-              - No persistence unless specified
-              - Keep code minimal and explicit
-              - Follow existing project architecture patterns
-              
-              PATH CONSTRAINTS:
-              - Implementation files must be under backend/
-              - API docs must be under api/
-              - Follow the existing directory structure:
-                * backend/cmd/server/main.go - Entry point
-                * backend/internal/router/router.go - Route definitions
-                * backend/internal/handlers/ - HTTP handlers
-                * backend/internal/models/ - Data models
-                * backend/internal/repository/ - Data access layer
-                * backend/internal/config/ - Configuration
-                * backend/internal/middleware/ - Middleware
-                * backend/internal/database/ - Database connection
-                * backend/internal/cache/ - Cache connection
-              
-              ====================
-              PROJECT ARCHITECTURE & CONSTRAINTS
-              ====================
-              以下是从现有代码库中读取的系统文件，请严格遵循这些架构模式和代码风格：
-              
-              ${projectContextText}
-              
-              ====================
-              API CONTRACT (${apiContract.length} endpoints)
-              ====================
-              ${JSON.stringify(apiContract, null, 2)}
-              
-              ${userInstructions ? `====================
-              USER INSTRUCTIONS
-              ====================
-              ${userInstructions}` : ""}
-              
-              ====================
-              UI SPEC SOURCES
-              ====================
-              ${commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n")}
-              
-              ====================
-              IMPLEMENTATION REQUIREMENTS
-              ====================
-              1. 遵循现有代码架构模式（参考上面的系统文件）
-              2. 使用相同的包结构和命名约定
-              3. 遵循相同的错误处理模式
-              4. 使用相同的日志记录方式（zap.Logger）
-              5. 遵循相同的路由注册模式（在 router.go 中注册）
-              6. 如果涉及数据库操作，使用 Repository 模式
-              7. 如果涉及模型，遵循 GORM 模式
-              8. 所有文件路径必须在 backend/ 目录下
-              
-              请生成完整的后端实现代码，创建所有必要的文件。`;
+                RULES:
+                - Follow API contract strictly
+                - Do not infer UI behavior
+                - No persistence unless specified
+                - Keep code minimal and explicit
+                - Follow existing project architecture patterns
+
+                PATH CONSTRAINTS:
+                - Implementation files must be under backend/
+                - API docs must be under api/
+                - Follow the existing directory structure:
+                  * backend/cmd/server/main.go - Entry point
+                  * backend/internal/router/router.go - Route definitions
+                  * backend/internal/handlers/ - HTTP handlers
+                  * backend/internal/models/ - Data models
+                  * backend/internal/repository/ - Data access layer
+                  * backend/internal/config/ - Configuration
+                  * backend/internal/middleware/ - Middleware
+                  * backend/internal/database/ - Database connection
+                  * backend/internal/cache/ - Cache connection
+
+                ====================
+                PROJECT ARCHITECTURE & CONSTRAINTS
+                ====================
+                以下是从现有代码库中读取的系统文件，请严格遵循这些架构模式和代码风格：
+
+                ${projectContextText}
+
+                ====================
+                API CONTRACT (${apiContract.length} endpoints)
+                ====================
+                ${JSON.stringify(apiContract, null, 2)}
+
+                ${userInstructions ? `====================
+                USER INSTRUCTIONS
+                ====================
+                ${userInstructions}` : ""}
+
+                ====================
+                UI SPEC SOURCES
+                ====================
+                ${commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n")}
+
+                ====================
+                IMPLEMENTATION REQUIREMENTS
+                ====================
+                1. 遵循现有代码架构模式（参考上面的系统文件）
+                2. 使用相同的包结构和命名约定
+                3. 遵循相同的错误处理模式
+                4. 使用相同的日志记录方式（zap.Logger）
+                5. 遵循相同的路由注册模式（在 router.go 中注册）
+                6. 如果涉及数据库操作，使用 Repository 模式
+                7. 如果涉及模型，遵循 GORM 模式
+                8. 所有文件路径必须在 backend/ 目录下
+
+                请生成完整的后端实现代码，创建所有必要的文件。`;
 
               // Set output for anthropics/claude-code-action@v1
               core.setOutput("prompt_content", backendPrompt);
@@ -450,7 +449,7 @@ jobs:
             const fs = require("fs");
             const path = require("path");
             const { execSync } = require("child_process");
-            
+
             async function finalizeBackendAgent() {
               const branchName = process.env.BRANCH_NAME;
               const issue_number = Number(process.env.ISSUE_NUMBER);
@@ -535,5 +534,5 @@ jobs:
                 ].join("\n")
               });
             }
-            
+
             await finalizeBackendAgent();

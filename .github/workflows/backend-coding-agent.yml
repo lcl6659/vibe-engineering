@@ -1,0 +1,194 @@
+name: Backend Coding Agent
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  backend-agent:
+    if: |
+      contains(github.event.comment.body, '/code-backend-agent') &&
+      !github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+          cache-dependency-path: backend/go.sum
+
+      - name: Read Prompt Template
+        id: prompt
+        run: |
+          PROMPT=$(cat .github/prompts/backend-agent-prompt.md)
+          
+          BACKEND_SPEC=""
+          if [ -f "BACKEND_SPEC.md" ]; then
+            BACKEND_SPEC=$(cat BACKEND_SPEC.md)
+          fi
+          
+          BACKEND_CLAUDE_MD=""
+          if [ -f "backend/CLAUDE.md" ]; then
+            BACKEND_CLAUDE_MD=$(cat backend/CLAUDE.md)
+          fi
+          
+          PROMPT="${PROMPT//\{\{BACKEND_SPEC\}\}/$BACKEND_SPEC}"
+          PROMPT="${PROMPT//\{\{BACKEND_CLAUDE_MD\}\}/$BACKEND_CLAUDE_MD}"
+          PROMPT="${PROMPT//\{\{ISSUE_TITLE\}\}/${{ github.event.issue.title }}}"
+          PROMPT="${PROMPT//\{\{ISSUE_BODY\}\}/${{ github.event.issue.body }}}"
+          PROMPT="${PROMPT//\{\{ISSUE_COMMENTS\}\}/}"
+          PROMPT="${PROMPT//\{\{EXISTING_FILES\}\}/}"
+          
+          echo "AGENT_PROMPT<<EOF" >> $GITHUB_ENV
+          echo "$PROMPT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Run Claude Code Action
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+        with:
+          # 固定标准配置
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          model: anthropic/claude-sonnet-4.5
+          track_progress: true
+          prompt: |
+            ${{ env.AGENT_PROMPT }}
+            
+            IMPORTANT RULES:
+            - All API implementations MUST conform to api/openapi.yaml
+            - Use go build -C backend ./... instead of cd backend && go build
+            - Commit changes to a new branch: backend-agent/issue-${{ github.event.issue.number }}
+            - Do NOT create PR yourself, the workflow will handle it
+            - Run go test -C backend ./... to verify the implementation
+          # 必须赋予 AI 必要的工具权限以实现通用读取
+          allowed_tools: '["github:list_issue_comments", "github:get_issue", "github:create_pull_request", "github:push_changes", "github:comment_on_issue"]'
+
+      - name: Run Go Tests
+        id: test
+        continue-on-error: true
+        run: |
+          BRANCH_NAME="backend-agent/issue-${{ github.event.issue.number }}"
+          
+          if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+            git checkout "$BRANCH_NAME"
+            
+            echo "Running go test..."
+            if go test -C backend ./... -v 2>&1 | tee test-output.txt; then
+              echo "TEST_RESULT=passed" >> $GITHUB_ENV
+            else
+              echo "TEST_RESULT=failed" >> $GITHUB_ENV
+            fi
+            
+            TEST_OUTPUT=$(cat test-output.txt | tail -50)
+            echo "TEST_OUTPUT<<EOF" >> $GITHUB_ENV
+            echo "$TEST_OUTPUT" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+            
+            echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          else
+            echo "Branch $BRANCH_NAME not found, skipping tests"
+            echo "TEST_RESULT=skipped" >> $GITHUB_ENV
+            echo "BRANCH_NAME=" >> $GITHUB_ENV
+          fi
+
+      - name: Create Pull Request
+        if: env.BRANCH_NAME != ''
+        uses: actions/github-script@v8
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          CLAUDE_RESPONSE: ${{ steps.claude.outputs.response }}
+        with:
+          script: |
+            const branchName = process.env.BRANCH_NAME;
+            const testResult = process.env.TEST_RESULT || 'unknown';
+            const testOutput = process.env.TEST_OUTPUT || '';
+            const claudeResponse = process.env.CLAUDE_RESPONSE || '';
+            
+            const testStatus = testResult === 'passed' ? '✅ Passed' : '❌ Failed';
+            
+            let prBody = '## Backend Agent Delivery Report\n\n' +
+              '### Related Issue\n' +
+              'Closes #' + process.env.ISSUE_NUMBER + '\n\n' +
+              '### Claude Response\n' +
+              claudeResponse.substring(0, 3000) + '\n\n' +
+              '### Test Results\n' +
+              '**Status**: ' + testStatus + '\n\n' +
+              '<details>\n<summary>Test Output</summary>\n\n```\n' + testOutput + '\n```\n</details>\n\n' +
+              '---\n*Auto-generated by Backend Coding Agent*\n';
+            
+            try {
+              const pr = await github.rest.pulls.create({
+                ...context.repo,
+                title: '[BE] ' + process.env.ISSUE_TITLE,
+                head: branchName,
+                base: 'main',
+                body: prBody
+              });
+              
+              console.log('PR created: ' + pr.data.html_url);
+              
+              const commentBody = '### Backend Agent Completed ✅\n\n' +
+                '**PR**: ' + pr.data.html_url + '\n\n' +
+                '**Tests**: ' + testStatus + '\n\n' +
+                '---\n\n' +
+                '### Claude Response\n\n' +
+                claudeResponse.substring(0, 5000);
+              
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: parseInt(process.env.ISSUE_NUMBER),
+                body: commentBody
+              });
+              
+            } catch (e) {
+              console.log('PR creation failed: ' + e.message);
+              
+              const updateBody = '### Backend Agent Updated\n\n' +
+                'Branch `' + branchName + '` has been updated.\n\n' +
+                '**Tests**: ' + testStatus + '\n\n' +
+                '---\n\n' +
+                '### Claude Response\n\n' +
+                claudeResponse.substring(0, 5000);
+              
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: parseInt(process.env.ISSUE_NUMBER),
+                body: updateBody
+              });
+            }
+
+      - name: Comment on Failure
+        if: failure() || env.BRANCH_NAME == ''
+        uses: actions/github-script@v8
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          CLAUDE_RESPONSE: ${{ steps.claude.outputs.response }}
+        with:
+          script: |
+            const claudeResponse = process.env.CLAUDE_RESPONSE || 'No response captured';
+            
+            const commentBody = '### Backend Agent Failed ❌\n\n' +
+              'The agent encountered an error or did not create the expected branch.\n\n' +
+              '---\n\n' +
+              '### Claude Response\n\n' +
+              claudeResponse.substring(0, 5000);
+            
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: parseInt(process.env.ISSUE_NUMBER),
+              body: commentBody
+            });

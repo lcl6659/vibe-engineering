@@ -2,7 +2,7 @@ FROM golang:1.24 AS build
 
 WORKDIR /go/src/vibe-backend
 
-COPY . .
+COPY backend/ .
 
 RUN --mount=type=cache,id=s/3a2cccef-6f6d-4cb8-aaaf-a49ddec22628-/go/pkg/mod,target=/go/pkg/mod \
     go mod download

@@ -1,0 +1,272 @@
+name: Vibe Backend Agent
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  backend-agent:
+    if: contains(github.event.comment.body, '/agent-be')
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v5
+
+      - name: Setup Git
+        run: |
+          git config user.name "vibe-backend-agent"
+          git config user.email "agent@vibe.dev"
+
+      - name: Vibe Backend Agent - Generate Backend & API Contract
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+        with:
+          # 固定标准配置
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          track_progress: true
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const { execSync } = require("child_process");
+            const fetch = require("node-fetch");
+
+            async function runBackendAgent() {
+              const { owner, repo } = context.repo;
+              const issue_number = context.issue.number;
+              const commentBody = context.payload.comment.body;
+
+              // 1. Extract UI Spec comment URL
+              const match = commentBody.match(
+                /https:\/\/github\.com\/[^\s\)]+\/issues\/\d+#issuecomment-\d+/
+              );
+
+              if (!match) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number,
+                  body: [
+                    "❌ **缺少 UI Spec 评论 URL**",
+                    "",
+                    "用法：",
+                    "```",
+                    "/agent-be <ui-spec-comment-url>",
+                    "```",
+                    "",
+                    "Backend Agent 必须基于冻结的 UI Spec 执行。"
+                  ].join("\n")
+                });
+                return;
+              }
+
+              const commentUrl = match[0];
+              const commentId = commentUrl.split("#issuecomment-")[1];
+
+              // 2. Fetch UI Spec
+              const commentRes = await github.rest.issues.getComment({
+                owner,
+                repo,
+                comment_id: Number(commentId)
+              });
+
+              const frozenUISpec = commentRes.data.body;
+
+              // 3. Derive API contract
+              const contractPrompt = `
+                你是一个后端 API 契约设计专家。
+                
+                请基于以下冻结的 UI Spec，
+                推导前后端对齐所需的最小 API 契约。
+                
+                UI Spec:
+                ${frozenUISpec}
+                
+                返回 JSON：
+                {
+                  "endpoint": "/api/parse",
+                  "method": "POST",
+                  "description": "Parse YouTube/Twitter URL",
+                  "request": {
+                    "url": "string"
+                  },
+                  "response": {
+                    "source": "youtube | twitter",
+                    "title": "string",
+                    "author": "string",
+                    "summary": "string",
+                    "originalUrl": "string"
+                  },
+                  "errors": [
+                    { "code": "INVALID_URL", "message": "Unsupported URL" },
+                    { "code": "PARSE_FAILED", "message": "Unable to parse content" }
+                  ]
+                }
+                
+                只返回 JSON。
+                `;
+
+              const contractRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  model: "google/gemini-3-flash-preview",
+                  messages: [{ role: "user", content: contractPrompt }],
+                  temperature: 0.3
+                })
+              });
+
+              const contractData = await contractRes.json();
+              let apiContract;
+              try {
+                apiContract = JSON.parse(contractData.choices[0].message.content);
+              } catch {
+                throw new Error("Failed to parse API contract JSON.");
+              }
+
+              // 4. Write API contract doc
+              const apiDocPath = path.join(process.cwd(), "api/parse.json");
+              fs.mkdirSync(path.dirname(apiDocPath), { recursive: true });
+              fs.writeFileSync(apiDocPath, JSON.stringify(apiContract, null, 2), "utf8");
+
+              // 5. Post API contract comment
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: [
+                  "📄 **API 契约已生成（前后端对齐）**",
+                  "",
+                  "```json",
+                  JSON.stringify(apiContract, null, 2),
+                  "```",
+                  "",
+                  "⏳ 开始生成后端实现代码..."
+                ].join("\n")
+              });
+
+              // 6. Create branch
+              const branchName = `agent-be-${issue_number}-${Date.now()}`;
+              execSync(`git checkout -b ${branchName}`);
+
+              // 7. Backend implementation prompt
+              const systemPrompt = `
+                You are the Backend Execution Agent.
+                
+                RULES:
+                - Follow API contract strictly
+                - Do not infer UI behavior
+                - No persistence unless specified
+                - Keep code minimal and explicit
+                
+                PATH CONSTRAINTS:
+                - Implementation files must be under backend/
+                - API docs must be under api/
+                
+                OUTPUT FORMAT:
+                {
+                  "files": [
+                    { "path": "backend/relative/path.go", "content": "full code" }
+                  ]
+                }
+                
+                No markdown. No explanation.
+                `;
+                
+                              const userPrompt = `
+                API Contract:
+                ${JSON.stringify(apiContract, null, 2)}
+                `;
+
+              const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  model: "anthropic/claude-3.5-sonnet",
+                  messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
+                  ],
+                  temperature: 0.3
+                })
+              });
+
+              const data = await res.json();
+              const raw = data.choices?.[0]?.message?.content;
+              if (!raw) throw new Error("Backend model returned empty response.");
+
+              let jsonStr = raw.trim();
+              const matchJson = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+              if (matchJson) jsonStr = matchJson[1].trim();
+
+              let parsed;
+              try {
+                parsed = JSON.parse(jsonStr);
+              } catch {
+                throw new Error("Backend output is not valid JSON.");
+              }
+
+              // 8. Write backend files
+              for (const file of parsed.files) {
+                if (!file.path.startsWith("backend/")) {
+                  throw new Error(`Invalid backend path: ${file.path}`);
+                }
+                const fullPath = path.join(process.cwd(), file.path);
+                fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+                fs.writeFileSync(fullPath, file.content, "utf8");
+              }
+
+              execSync("git add .");
+              execSync(`git commit -m "feat: backend implementation for parsing (#${issue_number})"`);
+              execSync(`git push origin ${branchName}`);
+
+              // 9. Create PR
+              const pr = await github.rest.pulls.create({
+                owner,
+                repo,
+                title: `Backend: parsing implementation (#${issue_number})`,
+                head: branchName,
+                base: "main",
+                body: [
+                  "This PR was generated by Vibe Backend Agent.",
+                  "",
+                  "Includes:",
+                  "- API contract under /api",
+                  "- Backend implementation under /backend",
+                  "- UI contract respected",
+                  "",
+                  `UI Spec Source: ${commentUrl}`
+                ].join("\n")
+              });
+
+              // 10. Final comment
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: [
+                  "✅ **Backend Agent 完成**",
+                  "",
+                  `🔗 PR: ${pr.data.html_url}`,
+                  "",
+                  "- API 契约已写入 /api",
+                  "- 实现代码位于 /backend",
+                  "- UI 规格严格遵守"
+                ].join("\n")
+              });
+            }
+
+            await runBackendAgent();

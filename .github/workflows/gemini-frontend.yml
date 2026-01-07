@@ -164,23 +164,23 @@ jobs:
               // 2.1 Analyze requirements and generate todolist
               const analysisPrompt = `你是一个前端需求分析专家。请分析以下 UI 规格和用户指令，生成需求分析和待办清单。
 
-UI 规格来源${uiSpecs.length > 1 ? `（共 ${uiSpecs.length} 个）` : ''}:
-${commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n")}
-
-UI 规格内容:
-${combinedUISpec}
-
-${userInstructions ? `用户额外指令:\n${userInstructions}\n` : ""}请返回 JSON 格式:
-{
-  "analysis": "需求分析总结（2-3句话）",
-  "todolist": [
-    "待办项1",
-    "待办项2",
-    "待办项3"
-  ]
-}
-
-只返回 JSON，不要其他内容。`;
+                UI 规格来源${uiSpecs.length > 1 ? `（共 ${uiSpecs.length} 个）` : ''}:
+                ${commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n")}
+                
+                UI 规格内容:
+                ${combinedUISpec}
+                
+                ${userInstructions ? `用户额外指令:\n${userInstructions}\n` : ""}请返回 JSON 格式:
+                {
+                  "analysis": "需求分析总结（2-3句话）",
+                  "todolist": [
+                    "待办项1",
+                    "待办项2",
+                    "待办项3"
+                  ]
+                }
+                
+                只返回 JSON，不要其他内容。`;
 
               const analysisRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
@@ -396,40 +396,40 @@ ${userInstructions ? `用户额外指令:\n${userInstructions}\n` : ""}请返回
               No extra text.`;
               
               const userPrompt = `
-====================
-PROJECT ARCHITECTURE & CONSTRAINTS
-====================
-以下是从现有代码库中读取的系统文件，请严格遵循这些架构模式和代码风格：
-
-${projectContextText}
-
-====================
-SOURCE OF TRUTH${uiSpecs.length > 1 ? ` (${uiSpecs.length} UI Specs)` : ''}
-====================
-${commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n")}
-
-${combinedUISpec}
-
-${userInstructions ? `====================
-USER INSTRUCTIONS
-====================
-${userInstructions}` : ""}
-
-${analysisResult.todolist.length > 0 ? `====================
-TODO LIST (参考)
-====================
-${analysisResult.todolist.map((item, idx) => `${idx + 1}. ${item}`).join("\n")}` : ""}
-
-====================
-IMPLEMENTATION REQUIREMENTS
-====================
-1. 遵循现有代码架构模式（参考上面的系统文件）
-2. 使用相同的包结构和命名约定
-3. 遵循相同的代码风格和 TypeScript 类型定义
-4. 使用相同的工具函数和 Hooks
-5. 遵循相同的 API 调用模式
-6. 使用 shadcn/ui 组件库
-7. 所有文件路径必须在 frontend/ 目录下`;
+                ====================
+                PROJECT ARCHITECTURE & CONSTRAINTS
+                ====================
+                以下是从现有代码库中读取的系统文件，请严格遵循这些架构模式和代码风格：
+                
+                ${projectContextText}
+                
+                ====================
+                SOURCE OF TRUTH${uiSpecs.length > 1 ? ` (${uiSpecs.length} UI Specs)` : ''}
+                ====================
+                ${commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n")}
+                
+                ${combinedUISpec}
+                
+                ${userInstructions ? `====================
+                USER INSTRUCTIONS
+                ====================
+                ${userInstructions}` : ""}
+                
+                ${analysisResult.todolist.length > 0 ? `====================
+                TODO LIST (参考)
+                ====================
+                ${analysisResult.todolist.map((item, idx) => `${idx + 1}. ${item}`).join("\n")}` : ""}
+                
+                ====================
+                IMPLEMENTATION REQUIREMENTS
+                ====================
+                1. 遵循现有代码架构模式（参考上面的系统文件）
+                2. 使用相同的包结构和命名约定
+                3. 遵循相同的代码风格和 TypeScript 类型定义
+                4. 使用相同的工具函数和 Hooks
+                5. 遵循相同的 API 调用模式
+                6. 使用 shadcn/ui 组件库
+                7. 所有文件路径必须在 frontend/ 目录下`;
 
               // 5. Call model
               const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {

@@ -38,13 +38,34 @@ jobs:
               const issue_number = context.issue.number;
               const commentBody = context.payload.comment.body;
 
-              // 1. Extract UI Spec comment URL (supports both raw URL and markdown link format)
-              // GitHub auto-converts URLs to markdown: [#139 (comment)](https://...)
-              const match = commentBody.match(
-                /https:\/\/github\.com\/[^\s\)]+\/issues\/\d+#issuecomment-\d+/
-              );
+              // ==================== 上下文信息输出 ====================
+              console.log("=".repeat(80));
+              console.log("🔍 FRONTEND AGENT - 上下文信息");
+              console.log("=".repeat(80));
+              console.log(`📦 Repository: ${owner}/${repo}`);
+              console.log(`📋 Issue Number: #${issue_number}`);
+              console.log(`👤 Comment Author: ${context.payload.comment.user.login}`);
+              console.log(`🕐 Comment Created: ${context.payload.comment.created_at}`);
+              console.log(`🔗 Comment URL: ${context.payload.comment.html_url}`);
+              console.log("");
+              console.log("📝 收到的评论内容 (完整):");
+              console.log("-".repeat(80));
+              console.log(commentBody);
+              console.log("-".repeat(80));
+              console.log("");
 
-              if (!match) {
+              // 1. Extract UI Spec comment URLs (支持多个 URL)
+              // 支持 GitHub 自动转换的 markdown 链接格式: [#139 (comment)](https://...)
+              const urlPattern = /https:\/\/github\.com\/[^\s\)]+\/issues\/\d+#issuecomment-\d+/g;
+              const urlMatches = commentBody.match(urlPattern) || [];
+
+              console.log(`🔍 找到 ${urlMatches.length} 个 URL:`);
+              urlMatches.forEach((url, idx) => {
+                console.log(`  ${idx + 1}. ${url}`);
+              });
+              console.log("");
+
+              if (urlMatches.length === 0) {
                 await github.rest.issues.createComment({
                   owner,
                   repo,
@@ -52,57 +73,114 @@ jobs:
                   body: [
                     "❌ **缺少评论 URL**",
                     "",
-                    "用法: `/agent-fe <github issue comment url>`",
+                    "用法: `/agent-fe <github issue comment url-1> [<url-2> ...]`",
                     "",
-                    "示例:",
+                    "示例（单个 URL）:",
                     "```",
                     "/agent-fe https://github.com/owner/repo/issues/1#issuecomment-123456",
                     "请使用深色主题",
+                    "```",
+                    "",
+                    "示例（多个 URL）:",
+                    "```",
+                    "/agent-fe \\",
+                    "  https://github.com/owner/repo/issues/1#issuecomment-123456 \\",
+                    "  https://github.com/owner/repo/issues/1#issuecomment-789012",
                     "```"
                   ].join("\n")
                 });
                 return;
               }
 
-              const commentUrl = match[0];
-              const commentId = commentUrl.split("#issuecomment-")[1];
-
-              // 1.1 Extract user instructions (text after URL)
-              const userInstructions = commentBody
+              // 1.1 Extract user instructions (text after URLs)
+              let userInstructions = commentBody
                 .replace(/\/agent-fe\s*/, "")
-                .replace(commentUrl, "")
                 .trim();
-
-              // 2. Fetch UI Spec comment
-              const commentRes = await github.rest.issues.getComment({
-                owner,
-                repo,
-                comment_id: Number(commentId)
+              
+              // Remove all URLs from instructions
+              urlMatches.forEach(url => {
+                userInstructions = userInstructions.replace(url, "").trim();
               });
 
-              const frozenUISpec = commentRes.data.body;
+              console.log("📌 提取的用户额外指令:");
+              console.log("-".repeat(80));
+              console.log(userInstructions || "(无)");
+              console.log("-".repeat(80));
+              console.log("");
+
+              // 2. Fetch all UI Specs from multiple comments
+              const uiSpecs = [];
+              const commentUrls = [];
+              
+              for (const commentUrl of urlMatches) {
+                try {
+                  const commentId = commentUrl.split("#issuecomment-")[1];
+                  console.log(`📥 获取评论内容: ${commentUrl} (ID: ${commentId})`);
+                  
+                  const commentRes = await github.rest.issues.getComment({
+                    owner,
+                    repo,
+                    comment_id: Number(commentId)
+                  });
+
+                  const specContent = commentRes.data.body;
+                  uiSpecs.push({
+                    url: commentUrl,
+                    content: specContent,
+                    title: specContent.split('\n')[0] || 'UI Spec'
+                  });
+                  commentUrls.push(commentUrl);
+                  
+                  console.log(`✅ 成功获取评论 ${commentId}, 内容长度: ${specContent.length}`);
+                  console.log(`   标题: ${specContent.split('\n')[0] || '(无标题)'}`);
+                  console.log(`   内容预览: ${specContent.substring(0, 200)}${specContent.length > 200 ? '...' : ''}`);
+                } catch (error) {
+                  console.error(`❌ 获取评论失败 ${commentUrl}:`, error.message);
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number,
+                    body: `❌ **获取评论失败**: ${commentUrl}\n\n错误: ${error.message}`
+                  });
+                  return;
+                }
+              }
+
+              // 2.1 Combine all UI Specs
+              const combinedUISpec = uiSpecs.map((spec, idx) => {
+                return `## UI Spec ${idx + 1}: ${spec.title}\n\n来源: ${spec.url}\n\n${spec.content}`;
+              }).join("\n\n---\n\n");
+
+              console.log(`📋 合并后的 UI Spec 总长度: ${combinedUISpec.length} 字符`);
+              console.log(`📋 UI Spec 内容预览:`);
+              console.log("-".repeat(80));
+              console.log(combinedUISpec.substring(0, 500) + (combinedUISpec.length > 500 ? '\n...' : ''));
+              console.log("-".repeat(80));
+              console.log("");
+
+              // Use first URL as primary reference (for backward compatibility)
+              const commentUrl = commentUrls[0];
 
               // 2.1 Analyze requirements and generate todolist
               const analysisPrompt = `你是一个前端需求分析专家。请分析以下 UI 规格和用户指令，生成需求分析和待办清单。
 
-              UI 规格来源: ${commentUrl}
-              
-              UI 规格内容:
-              ${frozenUISpec}
-              
-              ${userInstructions ? `用户额外指令:\n${userInstructions}` : ""}
-              
-              请返回 JSON 格式:
-              {
-                "analysis": "需求分析总结（2-3句话）",
-                "todolist": [
-                  "待办项1",
-                  "待办项2",
-                  "待办项3"
-                ]
-              }
-              
-              只返回 JSON，不要其他内容。`;
+                UI 规格来源${uiSpecs.length > 1 ? `（共 ${uiSpecs.length} 个）` : ''}:
+                ${commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n")}
+                
+                UI 规格内容:
+                ${combinedUISpec}
+                
+                ${userInstructions ? `用户额外指令:\n${userInstructions}\n` : ""}请返回 JSON 格式:
+                {
+                  "analysis": "需求分析总结（2-3句话）",
+                  "todolist": [
+                    "待办项1",
+                    "待办项2",
+                    "待办项3"
+                  ]
+                }
+                
+                只返回 JSON，不要其他内容。`;
 
               const analysisRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
@@ -124,6 +202,12 @@ jobs:
               
               let analysisResult = { analysis: "", todolist: [] };
               if (analysisRaw) {
+                console.log("📊 需求分析原始响应:");
+                console.log("-".repeat(80));
+                console.log(analysisRaw.substring(0, 500) + (analysisRaw.length > 500 ? '\n...' : ''));
+                console.log("-".repeat(80));
+                console.log("");
+                
                 let analysisJsonStr = analysisRaw.trim();
                 const analysisJsonMatch = analysisJsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
                 if (analysisJsonMatch) {
@@ -131,8 +215,15 @@ jobs:
                 }
                 try {
                   analysisResult = JSON.parse(analysisJsonStr);
+                  console.log("✅ 需求分析解析成功:");
+                  console.log(`   分析: ${analysisResult.analysis}`);
+                  console.log(`   待办清单数量: ${analysisResult.todolist.length}`);
+                  analysisResult.todolist.forEach((item, idx) => {
+                    console.log(`     ${idx + 1}. ${item}`);
+                  });
+                  console.log("");
                 } catch (e) {
-                  console.error("Failed to parse analysis JSON:", e);
+                  console.error("❌ 需求分析解析失败:", e);
                   analysisResult.analysis = "需求分析完成";
                   analysisResult.todolist = ["实现前端界面"];
                 }
@@ -146,6 +237,10 @@ jobs:
                 body: [
                   "📋 **需求分析完成**",
                   "",
+                  `**处理的 UI Spec (${uiSpecs.length} 个):**`,
+                  commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n"),
+                  "",
+                  userInstructions ? `**用户额外指令:**\n${userInstructions}\n` : "",
                   "### 需求分析",
                   analysisResult.analysis || "正在分析需求...",
                   "",
@@ -156,11 +251,98 @@ jobs:
                 ].join("\n")
               });
 
-              // 3. Create new branch
+              // 3. Read frontend system files for project constraints
+              // Read system files list from ARCHITECTURE.md
+              const architectureDocPath = path.join(process.cwd(), "frontend/ARCHITECTURE.md");
+              let frontendSystemFiles = [];
+              
+              if (fs.existsSync(architectureDocPath)) {
+                const architectureDoc = fs.readFileSync(architectureDocPath, "utf8");
+                // Extract system files list from markdown code block between markers
+                const startMarker = "<!-- AGENT_SYSTEM_FILES_START -->";
+                const endMarker = "<!-- AGENT_SYSTEM_FILES_END -->";
+                const startIdx = architectureDoc.indexOf(startMarker);
+                const endIdx = architectureDoc.indexOf(endMarker);
+                
+                if (startIdx !== -1 && endIdx !== -1) {
+                  const filesSection = architectureDoc.substring(startIdx + startMarker.length, endIdx);
+                  // Extract file paths from code block (lines starting with frontend/)
+                  const fileLines = filesSection.split('\n')
+                    .map(line => line.trim())
+                    .filter(line => line.startsWith('frontend/') && !line.startsWith('```'));
+                  
+                  frontendSystemFiles = fileLines;
+                  console.log(`📖 从 ARCHITECTURE.md 读取到 ${frontendSystemFiles.length} 个系统文件`);
+                } else {
+                  console.log("⚠️  ARCHITECTURE.md 中未找到系统文件标记，使用默认列表");
+                  // Fallback to default list
+                  frontendSystemFiles = [
+                    "frontend/package.json",
+                    "frontend/tsconfig.json",
+                    "frontend/tailwind.config.ts",
+                    "frontend/components.json",
+                    "frontend/middleware.ts",
+                    "frontend/app/layout.tsx",
+                    "frontend/app/page.tsx",
+                    "frontend/lib/api/client.ts",
+                    "frontend/lib/api/config.ts",
+                    "frontend/lib/utils/utils.ts"
+                  ];
+                }
+              } else {
+                console.log("⚠️  ARCHITECTURE.md 不存在，使用默认系统文件列表");
+                // Fallback to default list
+                frontendSystemFiles = [
+                  "frontend/package.json",
+                  "frontend/tsconfig.json",
+                  "frontend/tailwind.config.ts",
+                  "frontend/components.json",
+                  "frontend/middleware.ts",
+                  "frontend/app/layout.tsx",
+                  "frontend/app/page.tsx",
+                  "frontend/lib/api/client.ts",
+                  "frontend/lib/api/config.ts",
+                  "frontend/lib/utils/utils.ts"
+                ];
+              }
+
+              // 3.1 Read system files content
+              const projectContext = {};
+              const readFiles = [];
+
+              for (const filePath of frontendSystemFiles) {
+                try {
+                  const fullPath = path.join(process.cwd(), filePath);
+                  if (fs.existsSync(fullPath)) {
+                    const content = fs.readFileSync(fullPath, "utf8");
+                    projectContext[filePath] = content;
+                    readFiles.push(filePath);
+                    console.log(`✅ 读取系统文件: ${filePath} (${content.length} 字符)`);
+                  } else {
+                    console.log(`⚠️  文件不存在: ${filePath}`);
+                  }
+                } catch (error) {
+                  console.error(`❌ 读取文件失败 ${filePath}:`, error.message);
+                }
+              }
+
+              console.log(`📚 共读取 ${readFiles.length} 个系统文件作为项目约束`);
+              console.log("");
+
+              // 3.2 Format project context
+              const projectContextText = Object.entries(projectContext)
+                .map(([filePath, content]) => {
+                  const ext = filePath.split('.').pop();
+                  const lang = ext === 'tsx' || ext === 'ts' ? 'typescript' : ext === 'json' ? 'json' : ext === 'css' ? 'css' : 'text';
+                  return `## ${filePath}\n\`\`\`${lang}\n${content}\n\`\`\``;
+                })
+                .join("\n\n");
+
+              // 4. Create new branch
               const branchName = `agent-fe-${issue_number}-${Date.now()}`;
               execSync(`git checkout -b ${branchName}`);
 
-              // 4. Build system prompt and user prompt
+              // 5. Build system prompt and user prompt
               const systemPrompt = `You are the **Frontend Execution Agent**.
               
               Your task:
@@ -196,10 +378,11 @@ jobs:
               ONLY files inside frontend/ directory are allowed.
               
               ====================
-              OUTPUT FORMAT (MANDATORY)
+              OUTPUT FORMAT (MANDATORY - CRITICAL)
               ====================
-              Return ONLY valid JSON in this exact shape:
+              You MUST return ONLY valid JSON. No markdown code blocks, no explanations, no extra text.
               
+              Required JSON structure:
               {
                 "files": [
                   {
@@ -209,27 +392,58 @@ jobs:
                 ]
               }
               
-              No markdown.
-              No explanations.
-              No extra text.`;
+              CRITICAL RULES:
+              - Start your response with { and end with }
+              - Do NOT wrap JSON in markdown code blocks (no \`\`\`json)
+              - Do NOT add any text before or after the JSON
+              - Ensure all strings are properly escaped
+              - Ensure all file paths start with "frontend/"
+              
+              Example of CORRECT output:
+              {"files":[{"path":"frontend/app/page.tsx","content":"export default function Page() { return <div>Hello</div>; }"}]}
+              
+              Example of WRONG output (DO NOT DO THIS):
+              \`\`\`json
+              {"files":[...]}
+              \`\`\`
+              
+              Return ONLY the JSON object, nothing else.`;
               
               const userPrompt = `
-              ====================
-              SOURCE OF TRUTH
-              ${commentUrl}
-              ====================
-              
-              ${frozenUISpec}
-              
-              ${userInstructions ? `====================
-              USER INSTRUCTIONS
-              ====================
-              ${userInstructions}` : ""}
-              
-              ${analysisResult.todolist.length > 0 ? `====================
-              TODO LIST (参考)
-              ====================
-              ${analysisResult.todolist.map((item, idx) => `${idx + 1}. ${item}`).join("\n")}` : ""}`;
+                ====================
+                PROJECT ARCHITECTURE & CONSTRAINTS
+                ====================
+                以下是从现有代码库中读取的系统文件，请严格遵循这些架构模式和代码风格：
+                
+                ${projectContextText}
+                
+                ====================
+                SOURCE OF TRUTH${uiSpecs.length > 1 ? ` (${uiSpecs.length} UI Specs)` : ''}
+                ====================
+                ${commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n")}
+                
+                ${combinedUISpec}
+                
+                ${userInstructions ? `====================
+                USER INSTRUCTIONS
+                ====================
+                ${userInstructions}` : ""}
+                
+                ${analysisResult.todolist.length > 0 ? `====================
+                TODO LIST (参考)
+                ====================
+                ${analysisResult.todolist.map((item, idx) => `${idx + 1}. ${item}`).join("\n")}` : ""}
+                
+                ====================
+                IMPLEMENTATION REQUIREMENTS
+                ====================
+                1. 遵循现有代码架构模式（参考上面的系统文件）
+                2. 使用相同的包结构和命名约定
+                3. 遵循相同的代码风格和 TypeScript 类型定义
+                4. 使用相同的工具函数和 Hooks
+                5. 遵循相同的 API 调用模式
+                6. 使用 shadcn/ui 组件库
+                7. 所有文件路径必须在 frontend/ 目录下`;
 
               // 5. Call model
               const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -252,21 +466,90 @@ jobs:
               const raw = data.choices?.[0]?.message?.content;
 
               if (!raw) {
+                console.error("❌ Model returned empty response.");
+                console.error("Response data:", JSON.stringify(data, null, 2));
                 throw new Error("Model returned empty response.");
               }
 
-              // 5.1 Extract JSON from possible markdown code block
+              console.log("📝 Model raw response length:", raw.length);
+              console.log("📝 Model raw response preview (first 500 chars):");
+              console.log("-".repeat(80));
+              console.log(raw.substring(0, 500));
+              console.log("-".repeat(80));
+
+              // 5.1 Extract JSON from possible markdown code block or find JSON object
               let jsonStr = raw.trim();
+              
+              console.log("📝 Model raw response length:", raw.length);
+              console.log("📝 Model raw response preview (first 1000 chars):");
+              console.log("-".repeat(80));
+              console.log(raw.substring(0, 1000));
+              console.log("-".repeat(80));
+              
+              // Try to extract from markdown code block first
               const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
               if (jsonMatch) {
                 jsonStr = jsonMatch[1].trim();
+                console.log("✅ Extracted JSON from markdown code block");
+              } else {
+                // Try to find JSON object by finding first { and last }
+                const firstBrace = jsonStr.indexOf('{');
+                const lastBrace = jsonStr.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                  jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+                  console.log("✅ Extracted JSON object from text");
+                } else {
+                  console.log("⚠️  No JSON structure found, using raw content");
+                }
               }
+
+              console.log("📄 JSON string length:", jsonStr.length);
+              console.log("📄 JSON string preview (first 1000 chars):");
+              console.log("-".repeat(80));
+              console.log(jsonStr.substring(0, 1000));
+              console.log("-".repeat(80));
+              console.log("📄 JSON string preview (last 500 chars):");
+              console.log("-".repeat(80));
+              console.log(jsonStr.substring(Math.max(0, jsonStr.length - 500)));
+              console.log("-".repeat(80));
 
               let parsed;
               try {
                 parsed = JSON.parse(jsonStr);
-              } catch {
-                throw new Error("Model output is not valid JSON.");
+                console.log("✅ JSON parsed successfully");
+                console.log(`📦 Parsed object has ${parsed.files?.length || 0} files`);
+              } catch (parseError) {
+                console.error("❌ JSON parse error:", parseError.message);
+                console.error("❌ Error position:", parseError.message.match(/position (\d+)/)?.[1] || "unknown");
+                console.error("❌ JSON string (full, length:", jsonStr.length, "chars):");
+                console.error("-".repeat(80));
+                console.error(jsonStr);
+                console.error("-".repeat(80));
+                
+                // Try to fix common JSON issues
+                let fixedJson = jsonStr;
+                let fixed = false;
+                
+                // Remove trailing commas before } or ]
+                fixedJson = fixedJson.replace(/,(\s*[}\]])/g, '$1');
+                if (fixedJson !== jsonStr) {
+                  fixed = true;
+                  console.log("🔧 Attempted fix: Removed trailing commas");
+                }
+                
+                // Try parsing fixed JSON
+                if (fixed) {
+                  try {
+                    parsed = JSON.parse(fixedJson);
+                    console.log("✅ Fixed JSON parsed successfully");
+                    console.log(`📦 Parsed object has ${parsed.files?.length || 0} files`);
+                  } catch (fixError) {
+                    console.error("❌ Fixed JSON still invalid:", fixError.message);
+                    throw new Error(`Model output is not valid JSON: ${parseError.message}. Fixed version also failed: ${fixError.message}`);
+                  }
+                } else {
+                  throw new Error(`Model output is not valid JSON: ${parseError.message}`);
+                }
               }
 
               // 6. Write files with path validation
@@ -384,7 +667,8 @@ jobs:
               const changelogEntry = [
                 `## ${timestamp} - Issue #${issue_number}`,
                 "",
-                `**UI Spec:** ${commentUrl}`,
+                `**UI Spec${uiSpecs.length > 1 ? 's' : ''} (${uiSpecs.length}):**`,
+                commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n"),
                 userInstructions ? `**用户指令:** ${userInstructions}` : "",
                 "",
                 "### 📝 需求分析",
@@ -448,6 +732,98 @@ jobs:
                 fileChanges.modified.push("frontend/AGENT_CHANGELOG.md");
               }
 
+              // 6.3 Update ARCHITECTURE.md if directory structure or constraints changed
+              if (fs.existsSync(architectureDocPath)) {
+                // Analyze if there are new important system files or directory structure changes
+                const newSystemFiles = [];
+                const newDirectories = new Set();
+                
+                // Check created files for potential system files
+                for (const file of fileChanges.created) {
+                  // Check if it's a configuration file or important system file
+                  const fileName = path.basename(file);
+                  const isConfigFile = fileName.includes('config') || 
+                                      fileName.includes('package.json') || 
+                                      fileName.includes('tsconfig') ||
+                                      fileName.includes('tailwind') ||
+                                      fileName.includes('middleware') ||
+                                      fileName.includes('layout') ||
+                                      fileName === 'page.tsx' ||
+                                      fileName === 'globals.css' ||
+                                      fileName === 'components.json';
+                  
+                  // Check if it's in a key directory (system-level files)
+                  const isKeyDir = file.includes('/lib/api/') ||
+                                  file.includes('/lib/utils/') ||
+                                  file.includes('/lib/config/') ||
+                                  file.includes('/lib/constants/') ||
+                                  file.includes('/types/') ||
+                                  file.includes('/hooks/');
+                  
+                  // Check if it's a root-level important file
+                  const isRootFile = file === 'frontend/middleware.ts' ||
+                                     file === 'frontend/components.json' ||
+                                     file === 'frontend/tailwind.config.ts' ||
+                                     file === 'frontend/tsconfig.json' ||
+                                     file === 'frontend/package.json' ||
+                                     file.startsWith('frontend/app/layout') ||
+                                     file.startsWith('frontend/app/page') ||
+                                     file.startsWith('frontend/app/globals');
+                  
+                  if (isConfigFile || isKeyDir || isRootFile) {
+                    newSystemFiles.push(file);
+                  }
+                  
+                  // Track new directories
+                  const dirPath = path.dirname(file);
+                  if (dirPath !== 'frontend' && dirPath.startsWith('frontend/')) {
+                    newDirectories.add(dirPath);
+                  }
+                }
+                
+                // If there are new system files or significant changes, update ARCHITECTURE.md
+                if (newSystemFiles.length > 0 || fileChanges.created.length > 5) {
+                  console.log(`📝 检测到架构变化，准备更新 ARCHITECTURE.md`);
+                  console.log(`   新系统文件: ${newSystemFiles.length} 个`);
+                  console.log(`   新目录: ${newDirectories.size} 个`);
+                  
+                  // Read current ARCHITECTURE.md
+                  let architectureContent = fs.readFileSync(architectureDocPath, "utf8");
+                  
+                  // Extract current system files list
+                  const startMarker = "<!-- AGENT_SYSTEM_FILES_START -->";
+                  const endMarker = "<!-- AGENT_SYSTEM_FILES_END -->";
+                  const startIdx = architectureContent.indexOf(startMarker);
+                  const endIdx = architectureContent.indexOf(endMarker);
+                  
+                  if (startIdx !== -1 && endIdx !== -1) {
+                    // Get current system files
+                    const currentFilesSection = architectureContent.substring(startIdx + startMarker.length, endIdx);
+                    const currentFiles = currentFilesSection.split('\n')
+                      .map(line => line.trim())
+                      .filter(line => line.startsWith('frontend/') && !line.startsWith('```'));
+                    
+                    // Merge with new system files (avoid duplicates)
+                    const allSystemFiles = [...new Set([...currentFiles, ...newSystemFiles])].sort();
+                    
+                    // Update system files list
+                    const newFilesSection = `\n\`\`\`\n${allSystemFiles.join('\n')}\n\`\`\`\n`;
+                    const updatedArchitecture = 
+                      architectureContent.substring(0, startIdx + startMarker.length) +
+                      newFilesSection +
+                      architectureContent.substring(endIdx);
+                    
+                    fs.writeFileSync(architectureDocPath, updatedArchitecture, "utf8");
+                    console.log(`✅ 已更新 ARCHITECTURE.md 系统文件列表（共 ${allSystemFiles.length} 个文件）`);
+                    
+                    // Add to file changes if not already tracked
+                    if (!fileChanges.modified.includes("frontend/ARCHITECTURE.md")) {
+                      fileChanges.modified.push("frontend/ARCHITECTURE.md");
+                    }
+                  }
+                }
+              }
+
               // 7. Commit changes
               execSync("git add .");
               execSync(`git commit -m "feat: implement frontend from frozen UI spec (#${issue_number})"`);
@@ -463,8 +839,10 @@ jobs:
                 body: [
                   "This PR was generated by Vibe Frontend Agent.",
                   "",
-                  `UI Spec Source: ${commentUrl}`,
+                  `**UI Spec Source${uiSpecs.length > 1 ? 's' : ''} (${uiSpecs.length}):**`,
+                  commentUrls.map(url => `- ${url}`).join("\n"),
                   "",
+                  userInstructions ? `**User Instructions:**\n${userInstructions}\n` : "",
                   "### 完成情况",
                   completionStatus.summary || "代码已生成",
                   "",
@@ -491,6 +869,9 @@ jobs:
                   "✅ **Frontend implementation completed**",
                   "",
                   `🔗 PR: ${pr.data.html_url}`,
+                  "",
+                  `**处理的 UI Spec (${uiSpecs.length} 个):**`,
+                  commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n"),
                   "",
                   "### 📊 完成情况",
                   completionStatus.summary || "代码已生成并提交",
@@ -525,10 +906,14 @@ jobs:
                   "**📝 变更日志:**",
                   `所有变更已记录到 \`frontend/AGENT_CHANGELOG.md\``,
                   "",
+                  "**📚 项目约束:**",
+                  `已读取 ${readFiles.length} 个系统文件作为架构参考`,
+                  "",
                   "---",
                   "Notes:",
                   "- ✅ 严格路径约束：所有文件仅在 `frontend/` 目录下",
                   "- ✅ 禁止在 `frontend/` 目录外创建任何文件",
+                  "- ✅ 遵循现有项目架构模式",
                   "- ✅ 变更历史已记录到 `frontend/AGENT_CHANGELOG.md`",
                   "- Frontend code generated and committed",
                   "- UI spec respected strictly",

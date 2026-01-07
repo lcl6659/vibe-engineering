@@ -1,45 +1,17 @@
-import type { Metadata } from "next";
-import { Space_Grotesk, Geist_Mono } from "next/font/google";
-import { ThemeProvider } from "next-themes";
-import { Toaster } from "@/components/ui/sonner";
-import "./globals.css";
+import './globals.css';
+import { Inter } from 'next/font/google';
 
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
+const inter = Inter({ subsets: ['latin'] });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-export const metadata: Metadata = {
-  title: "VibeFlow Frontend",
-  description: "VibeFlow AI-Native Development Workflow Frontend",
+export const metadata = {
+  title: 'Vibe Summarizer',
+  description: 'Instant summaries for YouTube and Twitter',
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${spaceGrotesk.variable} ${geistMono.variable} antialiased`}
-      >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-          <Toaster />
-        </ThemeProvider>
-      </body>
+    <html lang="en">
+      <body className={`${inter.className} bg-slate-50 text-slate-900`}>{children}</body>
     </html>
   );
 }

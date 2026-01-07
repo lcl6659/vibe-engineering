@@ -18,7 +18,7 @@ export const API_TIMEOUT = 30000; // 30秒
 /**
  * API 版本
  */
-export const API_VERSION = "/api/v1";
+export const API_VERSION = "/api";
 
 /**
  * 完整的 API 基础路径

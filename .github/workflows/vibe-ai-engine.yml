@@ -2,10 +2,7 @@ name: AI Tech Architect (shadcn + Go DB)
 
 on:
   issues:
-    types: [opened, labeled]
-    # ✅ 直接在 workflow 层面过滤标签
-    labels: ['🛠 tech']
-    if: github.event.label.name == '🛠 tech'
+    types: [labeled]
 
 jobs:
   tech-arch:
@@ -25,7 +22,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const prompt = `你是一个字节跳动资深技术 Lead。请分析以下需求并进行任务分发。
+            const prompt = `你是一个OpenAI技术 Lead。请分析以下需求并进行任务分发。
             标题: ${process.env.ISSUE_TITLE}
             描述: ${process.env.ISSUE_BODY || "（无描述）"}
 

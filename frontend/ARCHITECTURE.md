@@ -345,6 +345,63 @@ export default function MyComponent() {
 2. 在 `hooks/index.ts` 导出
 3. 添加使用示例和文档
 
+## 🚀 代码生成约束
+
+### 系统文件列表
+
+以下文件定义了项目的核心架构模式，代码生成时必须参考：
+
+<!-- AGENT_SYSTEM_FILES_START -->
+```
+frontend/package.json
+frontend/tsconfig.json
+frontend/tailwind.config.ts
+frontend/components.json
+frontend/middleware.ts
+frontend/app/layout.tsx
+frontend/app/page.tsx
+frontend/app/globals.css
+frontend/lib/api/client.ts
+frontend/lib/api/config.ts
+frontend/lib/api/types.ts
+frontend/lib/config/env.ts
+frontend/lib/utils/utils.ts
+frontend/lib/utils/toast.ts
+frontend/lib/constants/index.ts
+frontend/types/index.ts
+frontend/hooks/index.ts
+```
+<!-- AGENT_SYSTEM_FILES_END -->
+
+### 代码生成规则
+
+1. **遵循模块化架构**
+   - API 服务层 → `lib/api/`
+   - 工具函数 → `lib/utils/`
+   - 组件 → `components/`
+   - Hooks → `hooks/`
+   - 类型定义 → `types/`
+
+2. **路径约束**
+   - 所有文件必须在 `frontend/` 目录下
+   - 遵循现有目录结构
+   - 不允许在 `frontend/` 目录外创建文件
+
+3. **代码风格**
+   - 使用 TypeScript 严格模式
+   - 遵循现有代码风格
+   - 使用统一的导入路径别名 `@/`
+
+4. **组件规范**
+   - 使用 shadcn/ui 组件库
+   - 遵循组件命名规范
+   - 使用统一的样式方案（Tailwind CSS）
+
+5. **API 调用**
+   - 使用统一的 API 客户端
+   - 遵循 API 服务层模式
+   - 使用类型安全的 API 调用
+
 ## 📚 相关文档
 
 - [API 模块文档](./lib/api/README.md)

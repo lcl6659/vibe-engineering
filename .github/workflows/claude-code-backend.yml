@@ -1,0 +1,539 @@
+name: Vibe Backend Agent
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  backend-agent:
+    if: contains(github.event.comment.body, '/agent-be')
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v5
+
+      - name: Setup Git
+        run: |
+          git config user.name "vibe-backend-agent"
+          git config user.email "agent@vibe.dev"
+
+      - name: Vibe Backend Agent - Prepare Context
+        uses: actions/github-script@v7
+        id: prepare-context
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const { execSync } = require("child_process");
+            const core = require("@actions/core");
+
+            async function runBackendAgent() {
+              const { owner, repo } = context.repo;
+              const issue_number = context.issue.number;
+              const commentBody = context.payload.comment.body;
+
+              // ==================== 上下文信息输出 ====================
+              console.log("=".repeat(80));
+              console.log("🔍 BACKEND AGENT - 上下文信息");
+              console.log("=".repeat(80));
+              console.log(`📦 Repository: ${owner}/${repo}`);
+              console.log(`📋 Issue Number: #${issue_number}`);
+              console.log(`👤 Comment Author: ${context.payload.comment.user.login}`);
+              console.log(`🕐 Comment Created: ${context.payload.comment.created_at}`);
+              console.log(`🔗 Comment URL: ${context.payload.comment.html_url}`);
+              console.log("");
+              console.log("📝 收到的评论内容 (完整):");
+              console.log("-".repeat(80));
+              console.log(commentBody);
+              console.log("-".repeat(80));
+              console.log("");
+
+              // 1. Extract UI Spec comment URLs (支持多个 URL)
+              // 支持 GitHub 自动转换的 markdown 链接格式: [#139 (comment)](https://...)
+              const urlPattern = /https:\/\/github\.com\/[^\s\)]+\/issues\/\d+#issuecomment-\d+/g;
+              const urlMatches = commentBody.match(urlPattern) || [];
+
+              console.log(`🔍 找到 ${urlMatches.length} 个 URL:`);
+              urlMatches.forEach((url, idx) => {
+                console.log(`  ${idx + 1}. ${url}`);
+              });
+              console.log("");
+
+              if (urlMatches.length === 0) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number,
+                  body: [
+                    "❌ **缺少 UI Spec 评论 URL**",
+                    "",
+                    "用法：",
+                    "```",
+                    "/agent-be <ui-spec-comment-url-1> [<ui-spec-comment-url-2> ...]",
+                    "```",
+                    "",
+                    "示例：",
+                    "```",
+                    "/agent-be https://github.com/owner/repo/issues/139#issuecomment-123456",
+                    "",
+                    "或支持多个 URL：",
+                    "/agent-be \\",
+                    "  https://github.com/owner/repo/issues/139#issuecomment-123456 \\",
+                    "  https://github.com/owner/repo/issues/139#issuecomment-789012",
+                    "```",
+                    "",
+                    "Backend Agent 必须基于冻结的 UI Spec 执行。"
+                  ].join("\n")
+                });
+                return;
+              }
+
+              // 1.1 Extract user instructions (text after URLs)
+              let userInstructions = commentBody
+                .replace(/\/agent-be\s*/, "")
+                .trim();
+              
+              // Remove all URLs from instructions
+              urlMatches.forEach(url => {
+                userInstructions = userInstructions.replace(url, "").trim();
+              });
+
+              console.log("📌 提取的用户额外指令:");
+              console.log("-".repeat(80));
+              console.log(userInstructions || "(无)");
+              console.log("-".repeat(80));
+              console.log("");
+
+              // 2. Fetch all UI Specs from multiple comments
+              const uiSpecs = [];
+              const commentUrls = [];
+              
+              for (const commentUrl of urlMatches) {
+                try {
+                  const commentId = commentUrl.split("#issuecomment-")[1];
+                  console.log(`📥 获取评论内容: ${commentUrl} (ID: ${commentId})`);
+                  
+                  const commentRes = await github.rest.issues.getComment({
+                    owner,
+                    repo,
+                    comment_id: Number(commentId)
+                  });
+
+                  const specContent = commentRes.data.body;
+                  uiSpecs.push({
+                    url: commentUrl,
+                    content: specContent,
+                    title: specContent.split('\n')[0] || 'UI Spec'
+                  });
+                  commentUrls.push(commentUrl);
+                  
+                  console.log(`✅ 成功获取评论 ${commentId}, 内容长度: ${specContent.length}`);
+                  console.log(`   标题: ${specContent.split('\n')[0] || '(无标题)'}`);
+                  console.log(`   内容预览: ${specContent.substring(0, 200)}${specContent.length > 200 ? '...' : ''}`);
+                } catch (error) {
+                  console.error(`❌ 获取评论失败 ${commentUrl}:`, error.message);
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number,
+                    body: `❌ **获取评论失败**: ${commentUrl}\n\n错误: ${error.message}`
+                  });
+                  return;
+                }
+              }
+
+              // 2.1 Combine all UI Specs
+              const combinedUISpec = uiSpecs.map((spec, idx) => {
+                return `## UI Spec ${idx + 1}: ${spec.title}\n\n来源: ${spec.url}\n\n${spec.content}`;
+              }).join("\n\n---\n\n");
+
+              console.log(`📋 合并后的 UI Spec 总长度: ${combinedUISpec.length} 字符`);
+              console.log(`📋 UI Spec 内容预览:`);
+              console.log("-".repeat(80));
+              console.log(combinedUISpec.substring(0, 500) + (combinedUISpec.length > 500 ? '\n...' : ''));
+              console.log("-".repeat(80));
+              console.log("");
+
+              // 3. Derive API contract
+              const contractPrompt = `你是一个后端 API 契约设计专家。
+
+              请基于以下冻结的 UI Spec${uiSpecs.length > 1 ? '（包含多个 UI Spec）' : ''}，推导前后端对齐所需的最小 API 契约。
+
+              ${userInstructions ? `用户额外指令:\n${userInstructions}\n\n` : ''}UI Spec 内容:
+              ${combinedUISpec}
+
+              请分析所有 UI Spec，提取出所有需要的前后端交互接口，返回 JSON 数组格式：
+              [
+                {
+                  "endpoint": "/api/parse",
+                  "method": "POST",
+                  "description": "Parse YouTube/Twitter URL",
+                  "request": {
+                    "url": "string"
+                  },
+                  "response": {
+                    "source": "youtube | twitter",
+                    "title": "string",
+                    "author": "string",
+                    "summary": "string",
+                    "originalUrl": "string"
+                  },
+                  "errors": [
+                    { "code": "INVALID_URL", "message": "Unsupported URL" },
+                    { "code": "PARSE_FAILED", "message": "Unable to parse content" }
+                  ]
+                }
+              ]
+
+              如果只有一个接口，也可以返回单个对象（不是数组）。
+
+              只返回 JSON，不要其他内容。`;
+
+              const contractRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  model: "google/gemini-3-flash-preview",
+                  messages: [{ role: "user", content: contractPrompt }],
+                  temperature: 0.3
+                })
+              });
+
+              const contractData = await contractRes.json();
+              const contractRaw = contractData.choices?.[0]?.message?.content;
+              
+              if (!contractRaw) {
+                throw new Error("API contract model returned empty response.");
+              }
+
+              // Extract JSON from possible markdown code block
+              let contractJsonStr = contractRaw.trim();
+              const contractJsonMatch = contractJsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+              if (contractJsonMatch) {
+                contractJsonStr = contractJsonMatch[1].trim();
+              }
+
+              let apiContract;
+              try {
+                apiContract = JSON.parse(contractJsonStr);
+                console.log("✅ API 契约解析成功");
+                console.log(`📄 API 契约内容:`);
+                console.log("-".repeat(80));
+                console.log(JSON.stringify(apiContract, null, 2));
+                console.log("-".repeat(80));
+                console.log("");
+              } catch (error) {
+                console.error("❌ API 契约解析失败:", error);
+                console.error("原始内容:", contractRaw);
+                throw new Error(`Failed to parse API contract JSON: ${error.message}`);
+              }
+
+              // Normalize: ensure it's an array
+              if (!Array.isArray(apiContract)) {
+                apiContract = [apiContract];
+              }
+
+              // 4. Write API contract doc
+              const apiDocPath = path.join(process.cwd(), "api/contract.json");
+              fs.mkdirSync(path.dirname(apiDocPath), { recursive: true });
+              fs.writeFileSync(apiDocPath, JSON.stringify(apiContract, null, 2), "utf8");
+
+              // 4.1 Post analysis comment
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: [
+                  "📋 **UI Spec 分析完成**",
+                  "",
+                  `**找到 ${uiSpecs.length} 个 UI Spec:**`,
+                  commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n"),
+                  "",
+                  userInstructions ? `**用户额外指令:**\n${userInstructions}\n` : "",
+                  "📄 **API 契约已生成（前后端对齐）**",
+                  "",
+                  `**共 ${apiContract.length} 个接口:**`,
+                  apiContract.map((contract, idx) => 
+                    `\n### ${idx + 1}. ${contract.method} ${contract.endpoint}\n\`\`\`json\n${JSON.stringify(contract, null, 2)}\n\`\`\``
+                  ).join("\n"),
+                  "",
+                  "⏳ 开始生成后端实现代码..."
+                ].join("\n")
+              });
+
+              // 6. Read backend system files for project constraints
+              // Read system files list from ARCHITECTURE.md
+              const architectureDocPath = path.join(process.cwd(), "backend/ARCHITECTURE.md");
+              let backendSystemFiles = [];
+              
+              if (fs.existsSync(architectureDocPath)) {
+                const architectureDoc = fs.readFileSync(architectureDocPath, "utf8");
+                // Extract system files list from markdown code block between markers
+                const startMarker = "<!-- AGENT_SYSTEM_FILES_START -->";
+                const endMarker = "<!-- AGENT_SYSTEM_FILES_END -->";
+                const startIdx = architectureDoc.indexOf(startMarker);
+                const endIdx = architectureDoc.indexOf(endMarker);
+                
+                if (startIdx !== -1 && endIdx !== -1) {
+                  const filesSection = architectureDoc.substring(startIdx + startMarker.length, endIdx);
+                  // Extract file paths from code block (lines starting with backend/)
+                  const fileLines = filesSection.split('\n')
+                    .map(line => line.trim())
+                    .filter(line => line.startsWith('backend/') && !line.startsWith('```'));
+                  
+                  backendSystemFiles = fileLines;
+                  console.log(`📖 从 ARCHITECTURE.md 读取到 ${backendSystemFiles.length} 个系统文件`);
+                } else {
+                  console.log("⚠️  ARCHITECTURE.md 中未找到系统文件标记，使用默认列表");
+                  // Fallback to default list
+                  backendSystemFiles = [
+                    "backend/go.mod",
+                    "backend/cmd/server/main.go",
+                    "backend/internal/router/router.go",
+                    "backend/internal/config/config.go",
+                    "backend/internal/handlers/pomodoro.go",
+                    "backend/internal/models/pomodoro.go",
+                    "backend/internal/repository/pomodoro.go"
+                  ];
+                }
+              } else {
+                console.log("⚠️  ARCHITECTURE.md 不存在，使用默认系统文件列表");
+                // Fallback to default list
+                backendSystemFiles = [
+                  "backend/go.mod",
+                  "backend/cmd/server/main.go",
+                  "backend/internal/router/router.go",
+                  "backend/internal/config/config.go",
+                  "backend/internal/handlers/pomodoro.go",
+                  "backend/internal/models/pomodoro.go",
+                  "backend/internal/repository/pomodoro.go"
+                ];
+              }
+
+              const projectContext = {};
+              const readFiles = [];
+
+              for (const filePath of backendSystemFiles) {
+                try {
+                  const fullPath = path.join(process.cwd(), filePath);
+                  if (fs.existsSync(fullPath)) {
+                    const content = fs.readFileSync(fullPath, "utf8");
+                    projectContext[filePath] = content;
+                    readFiles.push(filePath);
+                    console.log(`✅ 读取系统文件: ${filePath} (${content.length} 字符)`);
+                  } else {
+                    console.log(`⚠️  文件不存在: ${filePath}`);
+                  }
+                } catch (error) {
+                  console.error(`❌ 读取文件失败 ${filePath}:`, error.message);
+                }
+              }
+
+              console.log(`📚 共读取 ${readFiles.length} 个系统文件作为项目约束`);
+              console.log("");
+
+              // 6.1 Format project context
+              const projectContextText = Object.entries(projectContext)
+                .map(([filePath, content]) => {
+                  return `## ${filePath}\n\`\`\`go\n${content}\n\`\`\``;
+                })
+                .join("\n\n");
+
+              // 7. Create branch
+              const branchName = `agent-be-${issue_number}-${Date.now()}`;
+              execSync(`git checkout -b ${branchName}`);
+
+              // 8. Prepare prompt for anthropics/claude-code-action@v1
+              const backendPrompt = `You are the Backend Execution Agent.
+
+RULES:
+- Follow API contract strictly
+- Do not infer UI behavior
+- No persistence unless specified
+- Keep code minimal and explicit
+- Follow existing project architecture patterns
+
+PATH CONSTRAINTS:
+- Implementation files must be under backend/
+- API docs must be under api/
+- Follow the existing directory structure:
+  * backend/cmd/server/main.go - Entry point
+  * backend/internal/router/router.go - Route definitions
+  * backend/internal/handlers/ - HTTP handlers
+  * backend/internal/models/ - Data models
+  * backend/internal/repository/ - Data access layer
+  * backend/internal/config/ - Configuration
+  * backend/internal/middleware/ - Middleware
+  * backend/internal/database/ - Database connection
+  * backend/internal/cache/ - Cache connection
+
+====================
+PROJECT ARCHITECTURE & CONSTRAINTS
+====================
+以下是从现有代码库中读取的系统文件，请严格遵循这些架构模式和代码风格：
+
+${projectContextText}
+
+====================
+API CONTRACT (${apiContract.length} endpoints)
+====================
+${JSON.stringify(apiContract, null, 2)}
+
+${userInstructions ? `====================
+USER INSTRUCTIONS
+====================
+${userInstructions}` : ""}
+
+====================
+UI SPEC SOURCES
+====================
+${commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n")}
+
+====================
+IMPLEMENTATION REQUIREMENTS
+====================
+1. 遵循现有代码架构模式（参考上面的系统文件）
+2. 使用相同的包结构和命名约定
+3. 遵循相同的错误处理模式
+4. 使用相同的日志记录方式（zap.Logger）
+5. 遵循相同的路由注册模式（在 router.go 中注册）
+6. 如果涉及数据库操作，使用 Repository 模式
+7. 如果涉及模型，遵循 GORM 模式
+8. 所有文件路径必须在 backend/ 目录下
+
+请生成完整的后端实现代码，创建所有必要的文件。`;
+
+              // Set output for anthropics/claude-code-action@v1
+              core.setOutput("prompt_content", backendPrompt);
+              core.setOutput("branch_name", branchName);
+              
+              console.log("📝 Prompt prepared for anthropics/claude-code-action@v1");
+              console.log(`📏 Prompt length: ${backendPrompt.length} characters`);
+              console.log("✅ Context prepared. Next step will use anthropics/claude-code-action@v1");
+              
+              // Note: Code generation will be done by anthropics/claude-code-action@v1 in the next step
+              // We skip file writing here as it will be handled by Claude Code Action
+            }
+
+            await runBackendAgent();
+
+      - name: Run Claude Code Action
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+        with:
+          # 固定标准配置
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
+          track_progress: true
+          prompt: ${{ steps.prepare-context.outputs.prompt_content }}
+
+      - name: Vibe Backend Agent - Finalize and Create PR
+        uses: actions/github-script@v7
+        id: finalize
+        env:
+          BRANCH_NAME: ${{ steps.prepare-context.outputs.branch_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const { execSync } = require("child_process");
+            
+            async function finalizeBackendAgent() {
+              const branchName = process.env.BRANCH_NAME;
+              const issue_number = Number(process.env.ISSUE_NUMBER);
+              const { owner, repo } = context.repo;
+              
+              // Track file changes
+              const fileChanges = {
+                created: [],
+                modified: [],
+                errors: []
+              };
+              
+              // Get list of changed files
+              try {
+                const gitStatus = execSync("git status --porcelain", { encoding: "utf8" });
+                const changedFiles = gitStatus.split("\n")
+                  .filter(line => line.trim())
+                  .map(line => line.substring(3).trim());
+                
+                for (const file of changedFiles) {
+                  if (file.startsWith("backend/")) {
+                    if (fs.existsSync(file)) {
+                      fileChanges.modified.push(file);
+                    } else {
+                      fileChanges.created.push(file);
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error("Error tracking file changes:", error);
+              }
+              
+              // Commit changes
+              execSync("git add .");
+              execSync(`git commit -m "feat: backend implementation for parsing (#${issue_number})"`);
+              execSync(`git push origin ${branchName}`);
+              
+              // Create PR
+              const pr = await github.rest.pulls.create({
+                owner,
+                repo,
+                title: `Backend: parsing implementation (#${issue_number})`,
+                head: branchName,
+                base: "main",
+                body: [
+                  "This PR was generated by Vibe Backend Agent using anthropics/claude-code-action@v1.",
+                  "",
+                  "Includes:",
+                  "- API contract under /api",
+                  "- Backend implementation under /backend",
+                  "- UI contract respected"
+                ].join("\n")
+              });
+              
+              // Comment back to issue
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: [
+                  "✅ **Backend Agent 完成**",
+                  "",
+                  `🔗 PR: ${pr.data.html_url}`,
+                  "",
+                  "**📁 文件变更:**",
+                  "",
+                  `**新建 (${fileChanges.created.length}):**`,
+                  fileChanges.created.length > 0
+                    ? fileChanges.created.map(f => `- \`${f}\``).join("\n")
+                    : "- 无",
+                  "",
+                  `**修改 (${fileChanges.modified.length}):**`,
+                  fileChanges.modified.length > 0
+                    ? fileChanges.modified.map(f => `- \`${f}\``).join("\n")
+                    : "- 无",
+                  "",
+                  "- ✅ API 契约已写入 `/api/contract.json`",
+                  "- ✅ 实现代码位于 `/backend`",
+                  "- ✅ 使用 anthropics/claude-code-action@v1 生成代码",
+                  "- ✅ 遵循现有项目架构模式",
+                  "- ✅ UI 规格严格遵守"
+                ].join("\n")
+              });
+            }
+            
+            await finalizeBackendAgent();

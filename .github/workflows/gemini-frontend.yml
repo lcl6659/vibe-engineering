@@ -650,7 +650,6 @@ jobs:
               }
 
               // 6.3 Update ARCHITECTURE.md if directory structure or constraints changed
-              const architectureDocPath = path.join(process.cwd(), "frontend/ARCHITECTURE.md");
               if (fs.existsSync(architectureDocPath)) {
                 // Analyze if there are new important system files or directory structure changes
                 const newSystemFiles = [];

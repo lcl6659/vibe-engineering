@@ -27,8 +27,6 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
         with:
           script: |
-            const fetch = require("node-fetch");
-
             async function runUIAgent() {
               const prompt = `
                 You are the Product UI Architect Agent for this repository.

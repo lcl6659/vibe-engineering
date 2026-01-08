@@ -279,15 +279,11 @@ jobs:
                   frontendSystemFiles = [
                     "frontend/package.json",
                     "frontend/tsconfig.json",
-                    "frontend/tailwind.config.ts",
                     "frontend/components.json",
                     "frontend/app/layout.tsx",
-                    "frontend/app/page.tsx",
                     "frontend/app/globals.css",
                     "frontend/STYLE_GUIDE.md",
-                    "frontend/lib/api/client.ts",
-                    "frontend/lib/api/config.ts",
-                    "frontend/lib/utils/utils.ts"
+                    "frontend/lib/utils.ts"
                   ];
                 }
               } else {
@@ -296,15 +292,11 @@ jobs:
                   frontendSystemFiles = [
                     "frontend/package.json",
                     "frontend/tsconfig.json",
-                    "frontend/tailwind.config.ts",
                     "frontend/components.json",
                     "frontend/app/layout.tsx",
-                    "frontend/app/page.tsx",
                     "frontend/app/globals.css",
                     "frontend/STYLE_GUIDE.md",
-                    "frontend/lib/api/client.ts",
-                    "frontend/lib/api/config.ts",
-                    "frontend/lib/utils/utils.ts"
+                    "frontend/lib/utils.ts"
                   ];
               }
 
@@ -341,12 +333,100 @@ jobs:
                 console.log(`⚠️  样式指南不存在: frontend/STYLE_GUIDE.md`);
               }
 
-              // 3.3 Format project context
+              // 3.3 读取现有业务组件（关键！让 Agent 知道现有组件的导出方式）
+              console.log("📦 读取现有业务组件...");
+              const existingComponents = {};
+              
+              // 递归读取目录下所有 .tsx 文件的辅助函数
+              function readDirRecursive(dir, baseDir = '') {
+                const files = [];
+                if (!fs.existsSync(dir)) return files;
+                
+                const entries = fs.readdirSync(dir, { withFileTypes: true });
+                for (const entry of entries) {
+                  const relativePath = baseDir ? `${baseDir}/${entry.name}` : entry.name;
+                  if (entry.isDirectory()) {
+                    // 跳过 ui 目录（shadcn/ui 是只读的）
+                    if (entry.name !== 'ui') {
+                      files.push(...readDirRecursive(path.join(dir, entry.name), relativePath));
+                    }
+                  } else if (entry.name.endsWith('.tsx') || entry.name.endsWith('.ts')) {
+                    files.push(relativePath);
+                  }
+                }
+                return files;
+              }
+              
+              // 读取 components 目录下所有业务组件（排除 ui 目录）
+              const componentsDir = path.join(process.cwd(), "frontend/components");
+              const componentFiles = readDirRecursive(componentsDir)
+                .map(f => `frontend/components/${f}`);
+              
+              // 读取 app 目录下的页面文件
+              const appDir = path.join(process.cwd(), "frontend/app");
+              const pageFiles = readDirRecursive(appDir)
+                .filter(f => f.endsWith('page.tsx') || f.endsWith('layout.tsx'))
+                .map(f => `frontend/app/${f}`);
+              
+              // 读取 lib 目录下的工具文件
+              const libDir = path.join(process.cwd(), "frontend/lib");
+              const libFiles = readDirRecursive(libDir)
+                .map(f => `frontend/lib/${f}`);
+              
+              // 读取 types 目录
+              const typesDir = path.join(process.cwd(), "frontend/types");
+              const typeFiles = readDirRecursive(typesDir)
+                .map(f => `frontend/types/${f}`);
+              
+              // 合并所有文件路径
+              const allBusinessFiles = [...componentFiles, ...pageFiles, ...libFiles, ...typeFiles];
+              console.log(`📦 发现 ${allBusinessFiles.length} 个业务文件`);
+              
+              // 读取所有文件内容
+              for (const filePath of allBusinessFiles) {
+                try {
+                  const fullPath = path.join(process.cwd(), filePath);
+                  if (fs.existsSync(fullPath)) {
+                    const content = fs.readFileSync(fullPath, "utf8");
+                    // 限制单个文件大小（避免 token 过多）
+                    if (content.length < 15000) {
+                      existingComponents[filePath] = content;
+                      console.log(`✅ 读取: ${filePath} (${content.length} 字符)`);
+                    } else {
+                      // 大文件只读取前 5000 字符 + 导出语句
+                      const exportLines = content.split('\n')
+                        .filter(line => line.includes('export '))
+                        .join('\n');
+                      existingComponents[filePath] = content.substring(0, 5000) + 
+                        '\n\n// ... 文件过大已截断 ...\n\n// 导出语句:\n' + exportLines;
+                      console.log(`⚠️ 读取（已截断）: ${filePath}`);
+                    }
+                  }
+                } catch (error) {
+                  // 忽略读取失败的文件
+                }
+              }
+              
+              console.log(`📦 共读取 ${Object.keys(existingComponents).length} 个业务文件`);
+
+              // 3.4 Format project context (包含系统文件)
               const projectContextText = Object.entries(projectContext)
                 .map(([filePath, content]) => {
                   const ext = filePath.split('.').pop();
                   const lang = ext === 'tsx' || ext === 'ts' ? 'typescript' : ext === 'json' ? 'json' : ext === 'css' ? 'css' : 'text';
                   return `## ${filePath}\n\`\`\`${lang}\n${content}\n\`\`\``;
+                })
+                .join("\n\n");
+              
+              // 3.5 Format existing components context (关键！)
+              const existingComponentsText = Object.entries(existingComponents)
+                .map(([filePath, content]) => {
+                  // 检测导出方式
+                  const hasDefaultExport = content.includes('export default');
+                  const exportInfo = hasDefaultExport 
+                    ? '// ⚠️ 此文件使用 DEFAULT EXPORT，导入时请使用: import ComponentName from "..."' 
+                    : '// ⚠️ 此文件使用 NAMED EXPORT，导入时请使用: import { ComponentName } from "..."';
+                  return `## ${filePath}\n${exportInfo}\n\`\`\`typescript\n${content}\n\`\`\``;
                 })
                 .join("\n\n");
 
@@ -386,9 +466,14 @@ jobs:
                 ? `====================\nTODO LIST (参考)\n====================\n${analysisResult.todolist.map((item, idx) => `${idx + 1}. ${item}`).join("\n")}` 
                 : "";
               
+              // 构建现有代码上下文（关键！包含导出方式提示）
+              const existingCodeSection = existingComponentsText 
+                ? `\n\n====================\n📦 现有业务代码（必须参考导出方式！）\n====================\n\n⚠️ **重要**：以下是项目中现有的业务代码。\n- 修改或导入这些文件时，必须使用正确的导入语法\n- 每个文件开头的注释说明了它使用的是 DEFAULT EXPORT 还是 NAMED EXPORT\n\n${existingComponentsText}`
+                : "";
+              
               // Substitute template variables
               const userPrompt = userPromptTemplate
-                .replace("{{PROJECT_CONTEXT}}", projectContextText)
+                .replace("{{PROJECT_CONTEXT}}", projectContextText + existingCodeSection)
                 .replace("{{STYLE_GUIDE_CONTENT}}", styleGuideContent || '未找到 STYLE_GUIDE.md 文件')
                 .replace("{{UI_SPEC_COUNT}}", uiSpecCountText)
                 .replace("{{COMMENT_URLS}}", commentUrlsText)
@@ -397,6 +482,8 @@ jobs:
                 .replace("{{TODO_LIST_SECTION}}", todoListSection);
               
               console.log(`✅ 构建完成 user prompt: ${userPrompt.length} 字符`);
+              console.log(`   - 系统文件: ${Object.keys(projectContext).length} 个`);
+              console.log(`   - 业务文件: ${Object.keys(existingComponents).length} 个`);
 
               // 5. Call model
               const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {

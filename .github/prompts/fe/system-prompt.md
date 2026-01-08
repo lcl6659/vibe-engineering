@@ -226,6 +226,39 @@
 - 所有生成的组件必须被实际使用，不能只生成不引入
 - 修改现有页面时，必须保留原有功能，只增量修改
 
+## ⚠️ 导入语法规则（重要）
+
+**必须使用正确的导入方式，否则会报错！**
+
+### 业务组件（components/ 目录下）
+项目中的业务组件使用**默认导出**，必须用**默认导入**：
+
+```tsx
+// ✅ 正确：默认导入（不带花括号）
+import ContentCard from "./ContentCard";
+import AppContainer from "@/components/AppContainer";
+
+// ❌ 错误：命名导入（带花括号）- 会报错！
+import { ContentCard } from "./ContentCard";
+```
+
+### shadcn/ui 组件（components/ui/ 目录下）
+shadcn/ui 组件使用**命名导出**，必须用**命名导入**：
+
+```tsx
+// ✅ 正确：命名导入（带花括号）
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+
+// ❌ 错误：默认导入
+import Button from "@/components/ui/button";
+```
+
+### 判断规则
+- `@/components/ui/*` → 命名导入 `{ Component }`
+- `@/components/*` 或 `./Component` → 默认导入 `Component`
+- 查看目标文件的导出方式：`export default` → 默认导入，`export { }` → 命名导入
+
 ## 输出格式
 
 返回以下结构的 JSON 对象：

@@ -281,7 +281,6 @@ jobs:
                     "frontend/tsconfig.json",
                     "frontend/tailwind.config.ts",
                     "frontend/components.json",
-                    "frontend/middleware.ts",
                     "frontend/app/layout.tsx",
                     "frontend/app/page.tsx",
                     "frontend/app/globals.css",
@@ -299,7 +298,6 @@ jobs:
                     "frontend/tsconfig.json",
                     "frontend/tailwind.config.ts",
                     "frontend/components.json",
-                    "frontend/middleware.ts",
                     "frontend/app/layout.tsx",
                     "frontend/app/page.tsx",
                     "frontend/app/globals.css",
@@ -356,291 +354,49 @@ jobs:
               const branchName = `agent-fe-${issue_number}-${Date.now()}`;
               execSync(`git checkout -b ${branchName}`);
 
-              // 5. Build system prompt and user prompt
-              const systemPrompt = `You are the **Frontend Execution Agent**.
+              // 5. Build system prompt and user prompt from external files
+              const systemPromptPath = path.join(process.cwd(), ".github/prompts/fe/system-prompt.md");
+              const userPromptPath = path.join(process.cwd(), ".github/prompts/fe/user-prompt.md");
               
-              Your task:
-              Generate COMPLETE, BEAUTIFUL, POLISHED frontend code with **EXCELLENT VISUAL DESIGN** and output it in a MACHINE-PARSABLE FORMAT.
+              let systemPrompt = "";
+              let userPromptTemplate = "";
               
-              ⚠️ **CRITICAL: BEAUTIFUL UI IS MANDATORY**
-              Your generated UI MUST be visually stunning, professional, and modern.
-              DO NOT generate plain, boring, or unpolished interfaces.
-              
-              ====================
-              🎨 VISUAL DESIGN RULES (HIGHEST PRIORITY)
-              ====================
-              - **shadcn/ui (New York style)**: Use Card, Button, Badge, Separator, Skeleton, Avatar, Tabs, Dialog, etc.
-              - **Cards**: ALL content areas MUST use Card component with rounded-xl shadow-lg
-              - **Shadows**: Apply shadow-md or shadow-lg to elevate important elements
-              - **Rounded corners**: Use rounded-lg or rounded-xl for cards, rounded-md for inputs
-              - **Spacing**: Use consistent gap-4, gap-6, p-4, p-6, p-8 for proper breathing room
-              - **Hover effects**: ALL interactive elements MUST have hover states (hover:shadow-lg, hover:scale-[1.02])
-              - **Transitions**: Use transition-all duration-200 for smooth animations
-              - **Colors**: Use semantic colors (bg-background, text-foreground, bg-primary, text-muted-foreground)
-              - **Typography**: Use font-medium, font-semibold for headings, text-sm text-muted-foreground for secondary text
-              - **Icons**: Use Lucide React icons with proper sizing (w-4 h-4, w-5 h-5)
-              - **Borders**: Use border border-border for subtle separation
-              - **Focus states**: Input fields MUST have focus:ring-2 focus:ring-primary
-              
-              ====================
-              RULES (STRICT)
-              ====================
-              - UI spec is a contract
-              - No UI redesign
-              - No extra features
-              - No persistence
-              - Single Page Interface
-              - Next.js App Router
-              - TypeScript strict
-              - Tailwind CSS
-              - shadcn/ui component library (MANDATORY - use components from @/components/ui/)
-              - **DESIGN SYSTEM COMPLIANCE** - Follow the project's STYLE_GUIDE.md strictly
-              - **Space Grotesk font** - Already configured in the project
-              - **Lucide React icons** - Use for all iconography
-              
-              ====================
-              PATH CONSTRAINTS (STRICT - NO EXCEPTIONS)
-              ====================
-              ALL file paths MUST start with "frontend/"
-              You CANNOT create files outside the frontend/ directory.
-              You CANNOT create files in backend/, root, or any other directory.
-              
-              CRITICAL FORBIDDEN PATHS:
-              - ❌ "frontend/components/ui/" - COMPLETELY FORBIDDEN
-              - This directory contains shadcn/ui components that are READ-ONLY
-              - You MUST NOT create, modify, or delete ANY files in frontend/components/ui/
-              - You can ONLY import and use components from @/components/ui/
-              - If you need custom components, create them in frontend/components/ (outside ui/)
-              
-              - ❌ "frontend/app/globals.css" - COMPLETELY FORBIDDEN
-              - This file contains global styles managed by project maintainers
-              - You MUST NOT modify globals.css
-              - If you need custom styles, create CSS files in your component directory:
-                * Use CSS Modules: "frontend/components/my-component.module.css"
-                * Or regular CSS: "frontend/components/my-component.css"
-                * Import styles in your component file
-              
-              Examples:
-              - ✅ "frontend/app/page.tsx"
-              - ✅ "frontend/components/my-component.tsx"
-              - ✅ "frontend/components/my-component.module.css" (component-specific styles)
-              - ✅ "frontend/components/layout/header.tsx"
-              - ✅ "frontend/components/layout/header.module.css" (layout-specific styles)
-              - ❌ "frontend/components/ui/button.tsx" (REJECTED - ui/ is read-only)
-              - ❌ "frontend/components/ui/custom-button.tsx" (REJECTED - ui/ is read-only)
-              - ❌ "frontend/app/globals.css" (REJECTED - globals.css is read-only)
-              - ❌ "app/page.tsx" (REJECTED - outside frontend/)
-              - ❌ "components/button.tsx" (REJECTED - outside frontend/)
-              - ❌ "backend/api/handler.go" (REJECTED - backend files not allowed)
-              - ❌ "../frontend/app/page.tsx" (REJECTED - path traversal not allowed)
-              
-              ONLY files inside "frontend/" directory are allowed.
-              "frontend/components/ui/" directory is STRICTLY FORBIDDEN.
-              "frontend/app/globals.css" is STRICTLY FORBIDDEN.
-              
-              ====================
-              OUTPUT FORMAT (MANDATORY - CRITICAL)
-              ====================
-              You MUST return ONLY valid JSON. No markdown code blocks, no explanations, no extra text.
-              
-              Required JSON structure:
-              {
-                "files": [
-                  {
-                    "path": "frontend/relative/path/to/file.tsx",
-                    "content": "full file content"
-                  }
-                ]
+              if (fs.existsSync(systemPromptPath)) {
+                systemPrompt = fs.readFileSync(systemPromptPath, "utf8");
+                console.log(`✅ 读取 system prompt: ${systemPrompt.length} 字符`);
+              } else {
+                console.log("⚠️  system-prompt.md 不存在，使用空 system prompt");
               }
               
-              CRITICAL RULES:
-              - Start your response with { and end with }
-              - Do NOT wrap JSON in markdown code blocks (no \`\`\`json)
-              - Do NOT add any text before or after the JSON
-              - Ensure all strings are properly escaped
-              - Ensure all file paths start with "frontend/"
+              if (fs.existsSync(userPromptPath)) {
+                userPromptTemplate = fs.readFileSync(userPromptPath, "utf8");
+                console.log(`✅ 读取 user prompt template: ${userPromptTemplate.length} 字符`);
+              } else {
+                console.error("❌ user-prompt.md 不存在");
+                throw new Error("user-prompt.md not found");
+              }
               
-              Example of CORRECT output:
-              {"files":[{"path":"frontend/app/page.tsx","content":"export default function Page() { return <div>Hello</div>; }"}]}
+              // Build dynamic sections
+              const uiSpecCountText = uiSpecs.length > 1 ? ` (${uiSpecs.length} UI Specs)` : '';
+              const commentUrlsText = commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n");
+              const userInstructionsSection = userInstructions 
+                ? `====================\nUSER INSTRUCTIONS\n====================\n${userInstructions}` 
+                : "";
+              const todoListSection = analysisResult.todolist.length > 0 
+                ? `====================\nTODO LIST (参考)\n====================\n${analysisResult.todolist.map((item, idx) => `${idx + 1}. ${item}`).join("\n")}` 
+                : "";
               
-              Example of WRONG output (DO NOT DO THIS):
-              ${'```'}json
-              {"files":[...]}
-              ${'```'}
+              // Substitute template variables
+              const userPrompt = userPromptTemplate
+                .replace("{{PROJECT_CONTEXT}}", projectContextText)
+                .replace("{{STYLE_GUIDE_CONTENT}}", styleGuideContent || '未找到 STYLE_GUIDE.md 文件')
+                .replace("{{UI_SPEC_COUNT}}", uiSpecCountText)
+                .replace("{{COMMENT_URLS}}", commentUrlsText)
+                .replace("{{COMBINED_UI_SPEC}}", combinedUISpec)
+                .replace("{{USER_INSTRUCTIONS_SECTION}}", userInstructionsSection)
+                .replace("{{TODO_LIST_SECTION}}", todoListSection);
               
-              Return ONLY the JSON object, nothing else.`;
-              
-              const userPrompt = `
-                ====================
-                PROJECT ARCHITECTURE & CONSTRAINTS
-                ====================
-                以下是从现有代码库中读取的系统文件，请严格遵循这些架构模式和代码风格：
-                
-                ${projectContextText}
-                
-                ====================
-                📚 STYLE GUIDE（设计规范 - 必须严格遵循）
-                ====================
-                ${styleGuideContent || '未找到 STYLE_GUIDE.md 文件'}
-                
-                ====================
-                🎨 DESIGN SYSTEM REQUIREMENTS (CRITICAL - 美观性要求)
-                ====================
-                
-                ⚠️ **重要警告**：生成的 UI 必须是**精美的、专业的、现代化的**！
-                不要生成简陋、单调、缺乏设计感的界面！
-                
-                **UI 框架**：
-                - 组件库: shadcn/ui (New York 风格) - 必须使用！
-                - 基础颜色: Neutral
-                - 图标库: Lucide React
-                - 字体: Space Grotesk (主字体)
-                
-                **颜色系统**（浅色主题优先）：
-                - 背景：使用 bg-background（白色 #FFFFFF）
-                - 卡片：使用 bg-card（白色 #FFFFFF）
-                - 主色：使用 bg-primary（深绿色 #22C55E）
-                - 文本：使用 text-foreground（深色 #0A0A0A）
-                - 次要文本：使用 text-muted-foreground（灰色 #737373）
-                - 边框：使用 border（浅灰 #E5E5E5）
-                - ❌ 禁止硬编码颜色值，必须使用语义化 Tailwind 类
-                
-                **视觉层次（必须实现）**：
-                - 使用 Card 组件创建内容区域，添加 shadow-md 或 shadow-lg 阴影
-                - 使用 rounded-lg 或 rounded-xl 圆角
-                - 组件之间使用 gap-4、gap-6 等间距
-                - 使用 hover:shadow-lg、hover:scale-[1.02] 等悬停效果
-                - 使用 transition-all duration-200 实现平滑过渡
-                
-                **交互反馈（必须实现）**：
-                - 所有可点击元素必须有 hover 状态变化
-                - 输入框必须有 focus:ring-2 focus:ring-primary 焦点状态
-                - 按钮必须有 active:scale-95 点击反馈
-                - 加载状态使用 Skeleton 组件或 Spinner
-                
-                **布局规范**：
-                - 使用 flex、grid 布局，禁止使用 position: relative 作为主布局
-                - 响应式设计：使用 sm:、md:、lg:、xl: 前缀
-                - 容器使用 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8
-                - 内容区域使用适当的 padding：p-4、p-6、p-8
-                
-                **图标使用**：
-                - 使用 Lucide React 图标库
-                - 图标大小：w-4 h-4 (16px)、w-5 h-5 (20px)、w-6 h-6 (24px)
-                - 图标颜色：使用 text-muted-foreground 或 text-foreground
-                - 配合文本时使用 inline-flex items-center gap-2
-                
-                **组件使用规范**：
-                - 必须从 @/components/ui/ 导入 shadcn/ui 组件
-                - Card、Button、Input、Badge、Separator、Skeleton 等组件必须使用
-                - 使用 cn() 工具函数合并类名
-                - 表单使用 react-hook-form + zod 验证
-                
-                **动画和过渡**：
-                - 页面加载使用 staggered animation（延迟动画）
-                - 列表项使用 animate-in fade-in slide-in-from-bottom
-                - 悬停效果使用 transition-all duration-200 ease-in-out
-                - 禁用动画使用 motion-reduce:transition-none
-                
-                🎯 **美观性检查清单**（必须全部满足）：
-                - [ ] 所有卡片有圆角和阴影
-                - [ ] 所有按钮有悬停效果
-                - [ ] 文本有合适的字体大小和颜色层次
-                - [ ] 图标与文本对齐且大小合适
-                - [ ] 间距均匀，布局整洁
-                - [ ] 响应式设计在各尺寸下都美观
-                - [ ] 加载状态有 skeleton 或 spinner
-                - [ ] 空状态有友好的提示
-                
-                ====================
-                SOURCE OF TRUTH${uiSpecs.length > 1 ? ` (${uiSpecs.length} UI Specs)` : ''}
-                ====================
-                ${commentUrls.map((url, idx) => `${idx + 1}. ${url}`).join("\n")}
-                
-                ${combinedUISpec}
-                
-                ${userInstructions ? `====================
-                USER INSTRUCTIONS
-                ====================
-                ${userInstructions}` : ""}
-                
-                ${analysisResult.todolist.length > 0 ? `====================
-                TODO LIST (参考)
-                ====================
-                ${analysisResult.todolist.map((item, idx) => `${idx + 1}. ${item}`).join("\n")}` : ""}
-                
-                ====================
-                ⚡ IMPLEMENTATION REQUIREMENTS
-                ====================
-                
-                🎯 **核心原则：生成的 UI 必须是精美的、专业的、现代化的！**
-                
-                1. **遵循项目架构**：
-                   - 遵循现有代码架构模式（参考上面的系统文件）
-                   - 使用相同的包结构和命名约定
-                   - 遵循相同的代码风格和 TypeScript 类型定义
-                   - 使用相同的工具函数和 Hooks
-                   - 遵循相同的 API 调用模式
-                
-                2. **必须使用 shadcn/ui 组件库（New York 风格）**：
-                   - 从 @/components/ui/ 导入组件（如 Button, Input, Card, Badge, Dialog 等）
-                   - 常用组件：Card, Button, Input, Badge, Separator, Skeleton, Avatar, Tabs
-                   - **严禁修改或创建 frontend/components/ui/ 目录下的任何文件**
-                   - 如果需要自定义组件，在 frontend/components/ 目录下创建（不在 ui/ 子目录）
-                   - 使用 cn() 工具函数合并类名
-                
-                3. **必须严格遵循 STYLE_GUIDE.md 设计规范**：
-                   - 使用语义化颜色类：bg-background, text-foreground, bg-primary 等
-                   - 使用项目颜色方案：浅色主题优先，绿色主色调
-                   - 使用 Space Grotesk 字体（已在项目中配置）
-                   - 使用 Lucide React 图标库
-                
-                4. **🎨 美观性要求（关键 - 必须严格执行）**：
-                   
-                   📦 **卡片和容器**：
-                   - 所有内容区域使用 Card 组件包装
-                   - 卡片必须有圆角：rounded-lg 或 rounded-xl
-                   - 卡片必须有阴影：shadow-md 或 shadow-lg
-                   - 卡片悬停效果：hover:shadow-xl transition-shadow
-                   
-                   🎭 **交互效果**：
-                   - 按钮悬停：hover:bg-primary/90 或 hover:scale-105
-                   - 卡片悬停：hover:shadow-lg hover:scale-[1.02]
-                   - 输入框焦点：focus:ring-2 focus:ring-primary
-                   - 过渡动画：transition-all duration-200 ease-in-out
-                   
-                   📐 **间距和布局**：
-                   - 容器内边距：p-4、p-6、p-8
-                   - 元素间距：gap-2、gap-4、gap-6
-                   - 最大宽度：max-w-7xl mx-auto
-                   - 响应式内边距：px-4 sm:px-6 lg:px-8
-                   
-                   🎨 **颜色和对比**：
-                   - 主文本：text-foreground
-                   - 次要文本：text-muted-foreground
-                   - 边框：border border-border
-                   - 分隔线：<Separator className="my-4" />
-                   
-                   ✨ **动画效果**：
-                   - 页面加载动画：animate-in fade-in duration-500
-                   - 列表项渐入：animate-in slide-in-from-bottom-4
-                   - 骨架屏加载：<Skeleton className="h-4 w-full" />
-                   
-                   📱 **响应式设计**：
-                   - 使用 sm:、md:、lg:、xl: 前缀
-                   - 移动端优先：w-full md:w-1/2 lg:w-1/3
-                   - 网格布局：grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4
-                
-                5. **样式文件管理**：
-                   - **严禁修改 frontend/app/globals.css 文件**
-                   - 优先使用 Tailwind CSS 工具类
-                   - 如果需要自定义样式，在组件目录下创建 CSS Modules
-                
-                6. **禁止修改的文件**：
-                   - frontend/app/globals.css（全局样式文件，只读）
-                   - frontend/components/ui/*（shadcn/ui 组件，只读）
-                
-                7. **所有文件路径必须在 frontend/ 目录下**`;
+              console.log(`✅ 构建完成 user prompt: ${userPrompt.length} 字符`);
 
               // 5. Call model
               const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {

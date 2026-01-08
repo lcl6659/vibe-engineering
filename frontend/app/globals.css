@@ -50,8 +50,8 @@
 
 @layer base {
   :root {
-    /* 浅色主题颜色变量 */
-    --background: 0 0% 100%;        /* 白色背景 */
+    /* Base.org 风格 - 浅色主题 */
+    --background: 0 0% 100%;        /* 纯白背景 */
     --foreground: 0 0% 3.9%;        /* 深色文本 */
     
     --card: 0 0% 100%;               /* 白色卡片 */
@@ -60,8 +60,8 @@
     --popover: 0 0% 100%;            /* 白色弹出层 */
     --popover-foreground: 0 0% 3.9%;
     
-    --primary: 142 71% 45%;          /* 深绿色主色 */
-    --primary-foreground: 0 0% 98%;  /* 白色文本 */
+    --primary: 221 83% 53%;          /* Base 蓝色 (blue-600) */
+    --primary-foreground: 0 0% 100%; /* 白色文本 */
     
     --secondary: 0 0% 96.1%;         /* 浅灰次要色 */
     --secondary-foreground: 0 0% 9%;
@@ -69,19 +69,19 @@
     --muted: 0 0% 96.1%;             /* 浅灰静音色 */
     --muted-foreground: 0 0% 45.1%;
     
-    --accent: 0 0% 96.1%;            /* 浅灰强调色 */
-    --accent-foreground: 0 0% 9%;
+    --accent: 221 83% 96%;           /* 浅蓝强调色 */
+    --accent-foreground: 221 83% 53%;
     
     --destructive: 0 84.2% 60.2%;    /* 红色危险色 */
     --destructive-foreground: 0 0% 98%;
     
-    --border: 0 0% 89.8%;            /* 浅灰边框 */
-    --input: 0 0% 89.8%;              /* 浅灰输入框 */
-    --ring: 142 71% 45%;              /* 深绿色焦点环 */
+    --border: 0 0% 91%;              /* 更浅的边框 */
+    --input: 0 0% 91%;               /* 更浅的输入框 */
+    --ring: 221 83% 53%;             /* 蓝色焦点环 */
   }
 
   .dark {
-    /* 深色主题颜色变量（保留作为备选） */
+    /* Base.org 风格 - 深色主题 */
     --background: 0 0% 0%;           /* 纯黑背景 */
     --foreground: 0 0% 98%;          /* 浅色文本 */
     
@@ -91,8 +91,8 @@
     --popover: 0 0% 5%;               /* 深灰弹出层 */
     --popover-foreground: 0 0% 98%;
     
-    --primary: 142 71% 73%;           /* 亮绿色主色 */
-    --primary-foreground: 0 0% 9%;
+    --primary: 221 83% 53%;           /* Base 蓝色 */
+    --primary-foreground: 0 0% 100%;
     
     --secondary: 0 0% 10%;            /* 深灰次要色 */
     --secondary-foreground: 0 0% 98%;
@@ -100,15 +100,15 @@
     --muted: 0 0% 15%;                /* 深灰静音色 */
     --muted-foreground: 0 0% 57%;
     
-    --accent: 0 0% 10%;               /* 深灰强调色 */
-    --accent-foreground: 0 0% 98%;
+    --accent: 221 83% 15%;            /* 深蓝强调色 */
+    --accent-foreground: 221 83% 70%;
     
     --destructive: 0 84% 60%;         /* 红色危险色 */
     --destructive-foreground: 0 0% 98%;
     
     --border: 0 0% 12%;               /* 深灰边框 */
     --input: 0 0% 10%;                /* 深灰输入框 */
-    --ring: 142 71% 73%;              /* 亮绿色焦点环 */
+    --ring: 221 83% 53%;              /* 蓝色焦点环 */
   }
 
   body {

@@ -98,7 +98,13 @@ jobs:
                 '  "disambiguation_notes": ["歧义处理说明1", "歧义处理说明2"]',
                 "}",
                 "",
-                "只返回 JSON，不要其他内容。"
+                "只返回 JSON，不要其他内容。",
+                "",
+                "【关键约束】",
+                "- 禁止向用户提问或请求澄清",
+                "- 遇到歧义时，必须自行选择最保守的解释",
+                "- 无论需求多么模糊，都必须输出完整的 JSON 结构",
+                "- 在 disambiguation_notes 中记录你的解释决策"
               ].join("\n");
 
               const pmRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -144,6 +150,26 @@ jobs:
                 console.log("✅ PM Compiler 输出解析成功");
               } catch (e) {
                 console.error("PM Compiler JSON 解析失败，使用原始文本");
+                console.error("原始内容:", pmRawContent.substring(0, 500));
+                
+                // 如果模型返回了询问而不是 JSON，直接报错
+                if (pmRawContent.includes("请确认") || pmRawContent.includes("请明确") || pmRawContent.includes("请告诉我")) {
+                  await github.rest.issues.createComment({
+                    owner, repo, issue_number,
+                    body: [
+                      "⚠️ **PM Compiler 需要更明确的需求**",
+                      "",
+                      "模型认为需求存在歧义，请在 Issue 中补充以下信息：",
+                      "",
+                      pmRawContent,
+                      "",
+                      "---",
+                      "补充信息后，再次执行 `/agent-ui`"
+                    ].join("\n")
+                  });
+                  throw new Error("需求存在歧义，已请求用户澄清");
+                }
+                
                 pmResult = { raw: pmRawContent };
               }
 

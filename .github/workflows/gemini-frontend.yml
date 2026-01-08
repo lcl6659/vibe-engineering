@@ -404,9 +404,9 @@ jobs:
               - ❌ "backend/api/handler.go" (REJECTED - backend files not allowed)
               - ❌ "../frontend/app/page.tsx" (REJECTED - path traversal not allowed)
               
-              ONLY files inside frontend/ directory are allowed.
-              frontend/components/ui/ directory is STRICTLY FORBIDDEN.
-              frontend/app/globals.css is STRICTLY FORBIDDEN.
+              ONLY files inside "frontend/" directory are allowed.
+              "frontend/components/ui/" directory is STRICTLY FORBIDDEN.
+              "frontend/app/globals.css" is STRICTLY FORBIDDEN.
               
               ====================
               OUTPUT FORMAT (MANDATORY - CRITICAL)
@@ -434,9 +434,9 @@ jobs:
               {"files":[{"path":"frontend/app/page.tsx","content":"export default function Page() { return <div>Hello</div>; }"}]}
               
               Example of WRONG output (DO NOT DO THIS):
-              \`\`\`json
+              ${'```'}json
               {"files":[...]}
-              \`\`\`
+              ${'```'}
               
               Return ONLY the JSON object, nothing else.`;
               

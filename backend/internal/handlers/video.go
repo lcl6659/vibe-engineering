@@ -33,7 +33,7 @@ func NewVideoHandler(repo *repository.VideoRepository, youtubeService *services.
 	}
 }
 
-// GetMetadata fetches basic video metadata.
+// GetMetadata fetches video metadata and AI analysis directly using Gemini.
 // POST /api/v1/videos/metadata
 func (h *VideoHandler) GetMetadata(c *gin.Context) {
 	var req models.MetadataRequest
@@ -45,45 +45,55 @@ func (h *VideoHandler) GetMetadata(c *gin.Context) {
 		return
 	}
 
-	// Extract video ID
+	// Validate YouTube URL and extract video ID
 	videoID, err := h.youtubeService.ExtractVideoID(req.URL)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "INVALID_URL",
-			"message": "请输入有效的公开 YouTube 链接",
+			"message": "无效的 YouTube 链接",
 		})
 		return
 	}
 
-	// Get metadata
-	metadata, err := h.youtubeService.GetVideoMetadata(c.Request.Context(), req.URL)
+	h.log.Info("Processing metadata request with AI",
+		zap.String("video_id", videoID),
+		zap.String("url", req.URL),
+	)
+
+	// Get metadata and analysis directly from AI
+	result, err := h.youtubeService.GetMetadataWithAI(c.Request.Context(), req.URL)
 	if err != nil {
-		h.log.Error("Failed to get video metadata",
+		h.log.Error("Failed to get metadata with AI",
 			zap.Error(err),
 			zap.String("video_id", videoID),
 		)
+
+		// Determine error type
+		if err.Error() == "invalid URL format" || err.Error() == "not a YouTube URL" || err.Error() == "video ID not found in URL" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    "INVALID_URL",
+				"message": "无效的 YouTube 链接",
+			})
+			return
+		}
+
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    "METADATA_FETCH_FAILED",
-			"message": "无法获取视频信息",
+			"code":    "AI_SERVICE_ERROR",
+			"message": "OpenRouter 模型分析失败",
 		})
 		return
 	}
 
-	// Check if it's a private video (simplified check)
-	if metadata.Title == "" || metadata.Title == "Video "+videoID {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    "PRIVATE_VIDEO",
-			"message": "无法解析私有或受版权保护的视频",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, models.MetadataResponse{
-		VideoID:      metadata.VideoID,
-		Title:        metadata.Title,
-		Author:       metadata.Author,
-		ThumbnailURL: metadata.ThumbnailURL,
-		Duration:     metadata.Duration,
+	// Return the complete response with AI analysis
+	c.JSON(http.StatusOK, models.MetadataWithAIResponse{
+		Title:       result.Title,
+		Author:      result.Author,
+		Description: result.Description,
+		AIAnalysis:  result.AIAnalysis,
+		Metadata: models.MetadataInfo{
+			Duration:  result.Metadata.Duration,
+			Thumbnail: result.Metadata.Thumbnail,
+		},
 	})
 }
 

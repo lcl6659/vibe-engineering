@@ -35,6 +35,11 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 	parserService := services.NewParserService(log)
 	parseHandler := handlers.NewParseHandler(parserService, log)
 
+	// YouTube video analysis handlers
+	videoRepo := repository.NewVideoRepository(db.DB)
+	youtubeService := services.NewYouTubeService(cfg.OpenRouterAPIKey, log)
+	videoHandler := handlers.NewVideoHandler(videoRepo, youtubeService, log)
+
 	// Health check routes (no auth required)
 	r.GET("/health", healthHandler.Health)
 	r.GET("/ready", healthHandler.Ready)
@@ -54,6 +59,22 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 			pomodoros.PATCH("/:id", pomodoroHandler.Update)
 			pomodoros.DELETE("/:id", pomodoroHandler.Delete)
 			pomodoros.POST("/:id/complete", pomodoroHandler.Complete)
+		}
+
+		// YouTube video analysis routes (API v1)
+		v1 := api.Group("/v1")
+		{
+			// Video routes
+			videos := v1.Group("/videos")
+			{
+				videos.POST("/metadata", videoHandler.GetMetadata)
+				videos.POST("/analyze", videoHandler.AnalyzeVideo)
+				videos.GET("/result/:jobId", videoHandler.GetResult)
+				videos.POST("/export", videoHandler.ExportVideo)
+			}
+
+			// History routes
+			v1.GET("/history", videoHandler.GetHistory)
 		}
 	}
 

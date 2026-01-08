@@ -43,7 +43,13 @@ func main() {
 	defer db.Close()
 
 	// Auto-migrate models
-	if err := db.DB.AutoMigrate(&models.Pomodoro{}); err != nil {
+	if err := db.DB.AutoMigrate(
+		&models.Pomodoro{},
+		&models.VideoAnalysis{},
+		&models.Chapter{},
+		&models.Transcription{},
+		&models.KeyPoint{},
+	); err != nil {
 		log.Fatal("Failed to auto-migrate database", zap.Error(err))
 	}
 	log.Info("Database migration completed")

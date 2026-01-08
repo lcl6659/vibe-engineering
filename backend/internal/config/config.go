@@ -21,6 +21,9 @@ type Config struct {
 
 	// CORS configuration
 	AllowedOrigins []string `env:"ALLOWED_ORIGINS" envSeparator:"," envDefault:"*"`
+
+	// OpenRouter API configuration
+	OpenRouterAPIKey string `env:"OPENROUTER_API_KEY" envDefault:""`
 }
 
 // Load parses environment variables and returns a Config struct.

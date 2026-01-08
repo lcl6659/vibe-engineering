@@ -80,7 +80,7 @@ func (KeyPoint) TableName() string {
 
 // MetadataRequest represents the request to fetch video metadata.
 type MetadataRequest struct {
-	URL string `json:"url" binding:"required,url"`
+	URL string `json:"url" binding:"required"`
 }
 
 // MetadataResponse represents the video metadata response.

@@ -24,6 +24,10 @@ type Config struct {
 
 	// OpenRouter API configuration
 	OpenRouterAPIKey string `env:"OPENROUTER_API_KEY" envDefault:""`
+	// Gemini model configuration
+	GeminiModel string `env:"GEMINI_MODEL" envDefault:"google/gemini-3-flash-preview"`
+	// YouTube Data API v3 configuration
+	YouTubeAPIKey string `env:"YOUTUBE_API_KEY" envDefault:""`
 }
 
 // Load parses environment variables and returns a Config struct.

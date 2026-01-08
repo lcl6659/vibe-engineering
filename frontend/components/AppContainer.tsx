@@ -123,18 +123,24 @@ export default function AppContainer() {
 
         {history.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {history.map((item) => (
+            {history.map((item, index) => (
               <Card 
-                key={item.videoId} 
+                key={`${item.videoId}-${index}`} 
                 className="group overflow-hidden border-0 shadow-lg hover:shadow-2xl transition-all duration-300 rounded-[2rem] bg-background cursor-pointer"
                 onClick={() => setUrl(`https://youtube.com/watch?v=${item.videoId}`)}
               >
                 <div className="aspect-video relative overflow-hidden">
-                  <img 
-                    src={item.thumbnailUrl} 
-                    alt={item.title} 
-                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  />
+                  {item.thumbnailUrl ? (
+                    <img 
+                      src={item.thumbnailUrl} 
+                      alt={item.title} 
+                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-muted flex items-center justify-center">
+                      <span className="text-muted-foreground text-sm">No thumbnail</span>
+                    </div>
+                  )}
                   <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <div className="h-12 w-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center">
                       <Search className="text-white h-6 w-6" />

@@ -4,6 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Search } from "lucide-react";
 import { AnalysisResult } from "@/types/video";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from 'react-markdown';
 
 interface TranscriptionPanelProps {
   result: AnalysisResult;
@@ -53,13 +54,13 @@ export default function TranscriptionPanel({ result, currentTime, onSeek }: Tran
                 >
                   {item.timestamp}
                 </button>
-                <p className={cn(
-                  "text-sm leading-relaxed transition-colors",
+                <div className={cn(
+                  "text-sm leading-relaxed transition-colors prose prose-sm dark:prose-invert max-w-none",
                   isActive ? "text-foreground font-medium" : "text-muted-foreground",
                   searchQuery && item.text.toLowerCase().includes(searchQuery.toLowerCase()) && "bg-yellow-100 dark:bg-yellow-900/30"
                 )}>
-                  {item.text}
-                </p>
+                  <ReactMarkdown>{item.text}</ReactMarkdown>
+                </div>
               </div>
             );
           })}

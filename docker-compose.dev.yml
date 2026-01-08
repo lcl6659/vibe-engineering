@@ -43,6 +43,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=debug
       - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-google/gemini-3-flash-preview}
     volumes:
       # 挂载源代码，代码变化会立即反映到容器中
       - ./backend:/go/src/vibe-backend

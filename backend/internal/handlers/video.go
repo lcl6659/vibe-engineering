@@ -2,9 +2,12 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -35,48 +38,70 @@ func NewVideoHandler(repo *repository.VideoRepository, youtubeService *services.
 
 // GetMetadata fetches basic video metadata.
 // POST /api/v1/videos/metadata
+// Request body: {"url": "https://youtube.com/watch?v=..."} or {"videoId": "..."}
 func (h *VideoHandler) GetMetadata(c *gin.Context) {
-	var req models.MetadataRequest
+	var req struct {
+		URL     string `json:"url"`
+		VideoID string `json:"videoId"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "INVALID_REQUEST",
-			"message": err.Error(),
+			"message": fmt.Sprintf("请求格式错误: %v", err),
 		})
 		return
 	}
 
-	// Extract video ID
-	videoID, err := h.youtubeService.ExtractVideoID(req.URL)
+	// Determine video URL
+	var videoURL string
+	if req.URL != "" {
+		videoURL = req.URL
+	} else if req.VideoID != "" {
+		videoURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", req.VideoID)
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "INVALID_REQUEST",
+			"message": "必须提供 url 或 videoId",
+		})
+		return
+	}
+
+	// Extract video ID for validation
+	videoID, err := h.youtubeService.ExtractVideoID(videoURL)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "INVALID_URL",
-			"message": "请输入有效的公开 YouTube 链接",
+			"message": fmt.Sprintf("无效的 YouTube URL: %v", err),
 		})
 		return
 	}
 
 	// Get metadata
-	metadata, err := h.youtubeService.GetVideoMetadata(c.Request.Context(), req.URL)
+	metadata, err := h.youtubeService.GetVideoMetadata(c.Request.Context(), videoURL)
 	if err != nil {
 		h.log.Error("Failed to get video metadata",
 			zap.Error(err),
 			zap.String("video_id", videoID),
 		)
+		// Check if error is due to missing API key
+		if strings.Contains(err.Error(), "OPENROUTER_API_KEY") {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    "API_KEY_MISSING",
+				"message": "OPENROUTER_API_KEY 环境变量未配置，请设置该环境变量以使用视频分析功能",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    "METADATA_FETCH_FAILED",
-			"message": "无法获取视频信息",
+			"message": fmt.Sprintf("无法获取视频信息: %v", err),
 		})
 		return
 	}
 
-	// Check if it's a private video (simplified check)
-	if metadata.Title == "" || metadata.Title == "Video "+videoID {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    "PRIVATE_VIDEO",
-			"message": "无法解析私有或受版权保护的视频",
-		})
-		return
-	}
+	// 不再检查私有视频，因为：
+	// 1. API 可能返回空 title，但不代表视频是私有的
+	// 2. 实际的分析会在 AnalyzeVideo 中进行，那里会真正尝试获取字幕
+	// 3. 如果视频真的是私有的，在分析时会失败并返回相应错误
 
 	c.JSON(http.StatusOK, models.MetadataResponse{
 		VideoID:      metadata.VideoID,
@@ -87,10 +112,15 @@ func (h *VideoHandler) GetMetadata(c *gin.Context) {
 	})
 }
 
-// AnalyzeVideo starts a video analysis job.
+// AnalyzeVideo calls Gemini to analyze video and returns jobId for frontend compatibility.
 // POST /api/v1/videos/analyze
+// Request body: {"videoId": "video_id", "targetLanguage": "en"} or {"url": "https://youtube.com/watch?v=..."}
 func (h *VideoHandler) AnalyzeVideo(c *gin.Context) {
-	var req models.AnalyzeRequest
+	var req struct {
+		VideoID        string `json:"videoId"`
+		URL            string `json:"url"`
+		TargetLanguage string `json:"targetLanguage"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "INVALID_REQUEST",
@@ -99,25 +129,50 @@ func (h *VideoHandler) AnalyzeVideo(c *gin.Context) {
 		return
 	}
 
+	// Determine video URL and video ID
+	var videoURL string
+	var videoID string
+	if req.URL != "" {
+		videoURL = req.URL
+		var err error
+		videoID, err = h.youtubeService.ExtractVideoID(req.URL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    "INVALID_URL",
+				"message": "无效的 YouTube URL",
+			})
+			return
+		}
+	} else if req.VideoID != "" {
+		videoID = req.VideoID
+		videoURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", req.VideoID)
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "INVALID_REQUEST",
+			"message": "必须提供 videoId 或 url",
+		})
+		return
+	}
+
+	// Generate job ID for frontend compatibility
+	jobID := uuid.New().String()
+
 	// TODO: Get user ID from JWT token
 	userID := uint(1)
-
-	// Generate job ID
-	jobID := uuid.New().String()
 
 	// Create analysis record
 	analysis := &models.VideoAnalysis{
 		UserID:         userID,
-		VideoID:        req.VideoID,
+		VideoID:        videoID,
 		TargetLanguage: req.TargetLanguage,
 		JobID:          jobID,
-		Status:         "pending",
+		Status:         "processing",
 	}
 
 	if err := h.repo.CreateAnalysis(c.Request.Context(), analysis); err != nil {
 		h.log.Error("Failed to create analysis record",
 			zap.Error(err),
-			zap.String("video_id", req.VideoID),
+			zap.String("video_id", videoID),
 		)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    "ANALYSIS_FAILED",
@@ -126,13 +181,161 @@ func (h *VideoHandler) AnalyzeVideo(c *gin.Context) {
 		return
 	}
 
-	// Start analysis in background
-	go h.processAnalysis(context.Background(), analysis.ID, req.VideoID, req.TargetLanguage)
+	// Call Gemini directly and save result (even if error, save raw response)
+	go func() {
+		ctx := context.Background()
+		response, err := h.youtubeService.CallGeminiDirect(ctx, videoURL)
+		
+		// Get analysis record
+		analysisRecord, err2 := h.repo.GetAnalysisByJobID(ctx, jobID)
+		if err2 != nil {
+			h.log.Error("Failed to get analysis record", zap.Error(err2))
+			return
+		}
 
-	c.JSON(http.StatusOK, models.AnalyzeResponse{
-		JobID:  jobID,
-		Status: "pending",
-	})
+		// Even if Gemini returns error, save the response as completed
+		// User said: "大模型如果返回错误，也是正确的"
+		if err != nil {
+			h.log.Warn("Gemini returned error, but saving as completed",
+				zap.Error(err),
+				zap.String("video_url", videoURL),
+				zap.String("job_id", jobID),
+			)
+			// Save error message as transcription
+			analysisRecord.Status = "completed"
+			analysisRecord.Summary = err.Error()
+			if err := h.repo.UpdateAnalysis(ctx, analysisRecord); err != nil {
+				h.log.Error("Failed to update analysis", zap.Error(err))
+				return
+			}
+			// Save error as a single transcription entry
+			transcriptions := []models.Transcription{
+				{
+					AnalysisID: analysisRecord.ID,
+					Text:       fmt.Sprintf("Error: %v", err),
+					Timestamp:  "00:00",
+					Seconds:    0,
+					OrderIndex: 0,
+				},
+			}
+			h.repo.CreateTranscriptions(ctx, transcriptions)
+			return
+		}
+
+		// Parse response to extract transcription
+		var result struct {
+			Transcription []struct {
+				Text      string `json:"text"`
+				Timestamp string `json:"timestamp"`
+				Seconds   int    `json:"seconds"`
+			} `json:"transcription"`
+		}
+
+		// Clean response before parsing
+		cleanedResponse := strings.TrimSpace(response)
+		if strings.HasPrefix(cleanedResponse, "```json") {
+			cleanedResponse = strings.TrimPrefix(cleanedResponse, "```json")
+			cleanedResponse = strings.TrimSpace(cleanedResponse)
+		} else if strings.HasPrefix(cleanedResponse, "```") {
+			cleanedResponse = strings.TrimPrefix(cleanedResponse, "```")
+			cleanedResponse = strings.TrimSpace(cleanedResponse)
+		}
+		if strings.HasSuffix(cleanedResponse, "```") {
+			cleanedResponse = strings.TrimSuffix(cleanedResponse, "```")
+			cleanedResponse = strings.TrimSpace(cleanedResponse)
+		}
+		if !strings.HasPrefix(cleanedResponse, "{") {
+			startIdx := strings.Index(cleanedResponse, "{")
+			endIdx := strings.LastIndex(cleanedResponse, "}")
+			if startIdx != -1 && endIdx != -1 && endIdx > startIdx {
+				cleanedResponse = cleanedResponse[startIdx : endIdx+1]
+			}
+		}
+
+		// Even if parsing fails, save raw response as completed
+		if err := json.Unmarshal([]byte(cleanedResponse), &result); err != nil {
+			h.log.Warn("Failed to parse Gemini response, but saving raw response as completed",
+				zap.Error(err),
+				zap.String("job_id", jobID),
+				zap.String("raw_response", response),
+			)
+			// Save raw response as transcription
+			analysisRecord.Status = "completed"
+			analysisRecord.Summary = response // Save raw response
+			if err := h.repo.UpdateAnalysis(ctx, analysisRecord); err != nil {
+				h.log.Error("Failed to update analysis", zap.Error(err))
+				return
+			}
+			// Save raw response as a single transcription entry
+			transcriptions := []models.Transcription{
+				{
+					AnalysisID: analysisRecord.ID,
+					Text:       response,
+					Timestamp:  "00:00",
+					Seconds:    0,
+					OrderIndex: 0,
+				},
+			}
+			h.repo.CreateTranscriptions(ctx, transcriptions)
+			return
+		}
+
+		// Update analysis status to completed
+		analysisRecord.Status = "completed"
+		if err := h.repo.UpdateAnalysis(ctx, analysisRecord); err != nil {
+			h.log.Error("Failed to update analysis", zap.Error(err))
+			return
+		}
+
+		// Save transcriptions
+		transcriptions := make([]models.Transcription, len(result.Transcription))
+		for i, tr := range result.Transcription {
+			transcriptions[i] = models.Transcription{
+				AnalysisID: analysisRecord.ID,
+				Text:       tr.Text,
+				Timestamp:  tr.Timestamp,
+				Seconds:    tr.Seconds,
+				OrderIndex: i,
+			}
+		}
+		if err := h.repo.CreateTranscriptions(ctx, transcriptions); err != nil {
+			h.log.Error("Failed to save transcriptions", zap.Error(err))
+		}
+	}()
+
+	// Return jobId immediately for frontend compatibility
+	// #region agent log
+	func() {
+		logFile, _ := os.OpenFile("/Users/xiaozihao/Documents/01_Projects/Work_Code/work/Team_AI/vibe-engineering-playbook/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if logFile != nil {
+			defer logFile.Close()
+			logData := map[string]interface{}{
+				"sessionId":     "debug-session",
+				"runId":         "run1",
+				"hypothesisId":  "B",
+				"location":      "video.go:306",
+				"message":       "Returning jobId to frontend",
+				"data":          map[string]interface{}{"jobId": jobID, "status": "processing", "videoId": videoID, "requestBody": map[string]interface{}{"videoId": req.VideoID, "url": req.URL, "targetLanguage": req.TargetLanguage}},
+				"timestamp":     time.Now().UnixMilli(),
+			}
+			json.NewEncoder(logFile).Encode(logData)
+		}
+	}()
+	// #endregion
+	
+	// Ensure response format matches frontend expectation exactly
+	response := gin.H{
+		"jobId":  jobID,
+		"status": "processing",
+	}
+	
+	h.log.Info("Returning jobId to frontend",
+		zap.String("job_id", jobID),
+		zap.String("video_id", videoID),
+		zap.Any("response", response),
+	)
+	
+	c.JSON(http.StatusOK, response)
 }
 
 // processAnalysis performs the actual video analysis asynchronously.
@@ -159,43 +362,15 @@ func (h *VideoHandler) processAnalysis(ctx context.Context, analysisID uint, vid
 		return
 	}
 
-	// Update analysis with results
-	analysisRecord.Summary = result.Summary
+	// Update analysis with results - 只保存字幕，不保存摘要、关键点和章节
+	analysisRecord.Summary = ""
 	analysisRecord.Status = "completed"
-	if err := h.repo.UpdateAnalysis(ctx, &analysisRecord); err != nil {
+	if err := h.repo.UpdateAnalysis(ctx, analysisRecord); err != nil {
 		h.log.Error("Failed to update analysis", zap.Error(err))
 		return
 	}
 
-	// Save key points
-	keyPoints := make([]models.KeyPoint, len(result.KeyPoints))
-	for i, kp := range result.KeyPoints {
-		keyPoints[i] = models.KeyPoint{
-			AnalysisID: analysisID,
-			Content:    kp,
-			OrderIndex: i,
-		}
-	}
-	if err := h.repo.CreateKeyPoints(ctx, keyPoints); err != nil {
-		h.log.Error("Failed to save key points", zap.Error(err))
-	}
-
-	// Save chapters
-	chapters := make([]models.Chapter, len(result.Chapters))
-	for i, ch := range result.Chapters {
-		chapters[i] = models.Chapter{
-			AnalysisID: analysisID,
-			Title:      ch.Title,
-			Timestamp:  ch.Timestamp,
-			Seconds:    ch.Seconds,
-			OrderIndex: i,
-		}
-	}
-	if err := h.repo.CreateChapters(ctx, chapters); err != nil {
-		h.log.Error("Failed to save chapters", zap.Error(err))
-	}
-
-	// Save transcriptions
+	// 只保存字幕内容
 	transcriptions := make([]models.Transcription, len(result.Transcription))
 	for i, tr := range result.Transcription {
 		transcriptions[i] = models.Transcription{
@@ -264,37 +439,13 @@ func (h *VideoHandler) GetResult(c *gin.Context) {
 		return
 	}
 
-	// Get related data
-	keyPoints, err := h.repo.GetKeyPointsByAnalysisID(c.Request.Context(), analysis.ID)
-	if err != nil {
-		h.log.Error("Failed to get key points", zap.Error(err))
-	}
-
-	chapters, err := h.repo.GetChaptersByAnalysisID(c.Request.Context(), analysis.ID)
-	if err != nil {
-		h.log.Error("Failed to get chapters", zap.Error(err))
-	}
-
+	// 只获取字幕内容
 	transcriptions, err := h.repo.GetTranscriptionsByAnalysisID(c.Request.Context(), analysis.ID)
 	if err != nil {
 		h.log.Error("Failed to get transcriptions", zap.Error(err))
 	}
 
-	// Convert to response format
-	keyPointsStr := make([]string, len(keyPoints))
-	for i, kp := range keyPoints {
-		keyPointsStr[i] = kp.Content
-	}
-
-	chaptersResp := make([]models.ChapterResponse, len(chapters))
-	for i, ch := range chapters {
-		chaptersResp[i] = models.ChapterResponse{
-			Title:     ch.Title,
-			Timestamp: ch.Timestamp,
-			Seconds:   ch.Seconds,
-		}
-	}
-
+	// Convert to response format - 只返回字幕
 	transcriptionsResp := make([]models.TranscriptionResponse, len(transcriptions))
 	for i, tr := range transcriptions {
 		transcriptionsResp[i] = models.TranscriptionResponse{
@@ -306,9 +457,9 @@ func (h *VideoHandler) GetResult(c *gin.Context) {
 
 	c.JSON(http.StatusOK, models.AnalysisResultResponse{
 		Status:        "completed",
-		Summary:       analysis.Summary,
-		KeyPoints:     keyPointsStr,
-		Chapters:      chaptersResp,
+		Summary:       "",
+		KeyPoints:     []string{},
+		Chapters:      []models.ChapterResponse{},
 		Transcription: transcriptionsResp,
 	})
 }
@@ -400,6 +551,7 @@ func (h *VideoHandler) ExportVideo(c *gin.Context) {
 
 	// In a real implementation, you would upload to cloud storage and return a URL
 	// For now, we'll return the content directly
+	_ = content // content is generated but not yet used (will be uploaded to storage in future)
 	downloadURL := fmt.Sprintf("/api/v1/downloads/%s", fileName)
 
 	c.JSON(http.StatusOK, models.ExportResponse{

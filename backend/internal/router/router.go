@@ -37,7 +37,7 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 
 	// YouTube video analysis handlers
 	videoRepo := repository.NewVideoRepository(db.DB)
-	youtubeService := services.NewYouTubeService(cfg.OpenRouterAPIKey, log)
+	youtubeService := services.NewYouTubeService(cfg.OpenRouterAPIKey, cfg.GeminiModel, log)
 	videoHandler := handlers.NewVideoHandler(videoRepo, youtubeService, log)
 
 	// Health check routes (no auth required)

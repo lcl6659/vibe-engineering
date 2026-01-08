@@ -1,3 +1,44 @@
+## 2026-01-08T06:56:04.841Z - Issue #161
+
+**UI Specs (2):**
+1. https://github.com/lessthanno/vibe-engineering-playbook/issues/161#issuecomment-3722341955
+2. https://github.com/lessthanno/vibe-engineering-playbook/issues/161#issuecomment-3722312206
+**用户指令:** 后端接口文档：
+
+
+UI交互文档：
+
+### 📝 需求分析
+该项目旨在开发一个基于 AI 的 YouTube 视频解析助手，通过输入 URL 将视频转化为结构化的摘要、核心观点、章节及带时间戳的逐字稿。系统核心在于实现视频播放器与文本内容的实时联动、多语言翻译支持以及解析任务的异步处理与状态轮询。
+
+### ✅ 已完成
+- 搭建首页布局，实现居中 URL 输入框、目标语言选择器及最近解析记录卡片流
+- 开发详情页双栏布局，左侧集成 YouTube 官方播放器，右侧实现 Tabs 切换
+- 对接 /api/v1/videos/metadata 接口，在进入详情页前展示骨架屏并加载视频元数据
+- 实现智能总结面板，按规格展示摘要、核心观点及可跳转的章节折叠面板
+- 实现全文转录面板，支持关键词实时搜索高亮，并点击时间戳联动播放器
+- 开发视频播放实时高亮功能，使右侧逐字稿随播放进度自动滚动并高亮当前段落
+
+### ❌ 未完成
+- 实现输入校验逻辑，针对非 YouTube 链接或无效 URL 显示红字错误提示
+- 对接 /api/v1/videos/analyze 接口提交任务，并基于轮询机制展示解析进度
+- 对接 /api/v1/videos/export 接口，实现 PDF 和 Markdown 格式的导出功能
+- 适配移动端响应式布局，实现播放器吸顶及添加解析超时 Toast 提示与重试机制
+
+### 📁 文件变更
+
+**新建文件 (3):**
+- `frontend/components/SummaryPanel.tsx`
+- `frontend/components/TranscriptionPanel.tsx`
+- `frontend/components/VideoDetailView.tsx`
+
+**修改文件 (3):**
+- `frontend/types/video.ts`
+- `frontend/lib/api/endpoints.ts`
+- `frontend/components/AppContainer.tsx`
+
+
+---
 ## 2026-01-07T10:27:30.465Z - Issue #139
 
 **UI Spec (1):**

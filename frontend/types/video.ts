@@ -1,34 +1,34 @@
 export interface VideoMetadata {
-  title: string;
-  duration: number;
-  thumbnail: string;
-  videoId: string;
-  url: string;
-}
-
-export interface VideoNote {
-  id?: string;
-  videoUrl: string;
   videoId: string;
   title: string;
+  author: string;
+  thumbnailUrl: string;
   duration: number;
-  thumbnail: string;
-  content?: string;
-  createdAt?: string;
-  updatedAt?: string;
 }
 
-export interface YouTubeUrlInfo {
-  isValid: boolean;
-  videoId: string | null;
-  url: string | null;
-}
-
-export interface NoteFormData {
+export interface Chapter {
   title: string;
-  content: string;
-  videoURL?: string;
-  videoDuration?: number;
-  videoThumbnail?: string;
-  videoSource?: string;
+  timestamp: string;
+  seconds: number;
+}
+
+export interface TranscriptItem {
+  text: string;
+  timestamp: string;
+  seconds: number;
+}
+
+export interface AnalysisResult {
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  summary?: string;
+  keyPoints?: string[];
+  chapters?: Chapter[];
+  transcription?: TranscriptItem[];
+}
+
+export interface HistoryItem {
+  videoId: string;
+  title: string;
+  thumbnailUrl: string;
+  createdAt: string;
 }

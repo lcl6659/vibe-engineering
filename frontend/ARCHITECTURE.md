@@ -1213,6 +1213,10 @@ frontend/app/globals.css
 frontend/app/layout.tsx
 frontend/app/page.tsx
 frontend/components.json
+frontend/components/AppContainer.tsx
+frontend/components/SummaryPanel.tsx
+frontend/components/TranscriptionPanel.tsx
+frontend/components/VideoDetailView.tsx
 frontend/components/ui/button.tsx
 frontend/hooks/index.ts
 frontend/lib/api/client.ts
@@ -1229,6 +1233,7 @@ frontend/package.json
 frontend/tailwind.config.ts
 frontend/tsconfig.json
 frontend/types/index.ts
+frontend/types/video.ts
 ```
 <!-- AGENT_SYSTEM_FILES_END -->
 

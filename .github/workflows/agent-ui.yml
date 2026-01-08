@@ -175,6 +175,53 @@ jobs:
                 pmResult = { raw: pmRawContent };
               }
 
+              // ==================== Step 1.5: 读取现有页面内容（如果是修改页面）====================
+              let existingPageContent = "";
+              let existingPagePath = "";
+              
+              if (pmResult.page_type === "existing_page" && pmResult.target_page) {
+                existingPagePath = pmResult.target_page;
+                console.log("检测到修改现有页面，正在读取: " + existingPagePath);
+                
+                const fs = require('fs');
+                const path = require('path');
+                
+                try {
+                  // 尝试读取目标页面
+                  const fullPath = path.join(process.cwd(), existingPagePath);
+                  if (fs.existsSync(fullPath)) {
+                    existingPageContent = fs.readFileSync(fullPath, 'utf-8');
+                    console.log("✅ 成功读取现有页面，长度: " + existingPageContent.length + " 字符");
+                  } else {
+                    console.log("⚠️ 目标页面不存在: " + fullPath);
+                  }
+                } catch (e) {
+                  console.error("读取页面失败:", e.message);
+                }
+                
+                // 同时读取相关组件（如果页面中有 import）
+                if (existingPageContent) {
+                  const importMatches = existingPageContent.match(/from\s+['"]@\/components\/([^'"]+)['"]/g) || [];
+                  const componentFiles = importMatches.map(m => {
+                    const match = m.match(/from\s+['"]@\/components\/([^'"]+)['"]/);
+                    return match ? "frontend/components/" + match[1] + (match[1].endsWith('.tsx') ? '' : '.tsx') : null;
+                  }).filter(Boolean);
+                  
+                  for (const compFile of componentFiles.slice(0, 5)) { // 最多读取5个组件
+                    try {
+                      const compPath = path.join(process.cwd(), compFile);
+                      if (fs.existsSync(compPath)) {
+                        const compContent = fs.readFileSync(compPath, 'utf-8');
+                        existingPageContent += "\n\n// ===== " + compFile + " =====\n" + compContent;
+                        console.log("✅ 读取关联组件: " + compFile);
+                      }
+                    } catch (e) {
+                      // 忽略读取失败的组件
+                    }
+                  }
+                }
+              }
+
               // ==================== Step 2: UI Spec Generator ====================
               console.log("Step 2: 运行 UI Spec Generator，生成 Frozen UI Spec...");
 
@@ -219,15 +266,52 @@ jobs:
                 ].join("\n");
               }
 
+              // 构建现有页面上下文
+              let existingPageContext = "";
+              if (existingPageContent) {
+                existingPageContext = [
+                  "",
+                  "====================",
+                  "⚠️ 现有页面代码（必须保留）",
+                  "====================",
+                  "以下是目标页面的现有代码，你必须：",
+                  "1. 完整保留现有的所有功能和组件",
+                  "2. 保留现有的布局结构",
+                  "3. 新功能应该作为增量添加，而不是替换",
+                  "4. 在规格中明确标注哪些是「现有功能」哪些是「新增功能」",
+                  "",
+                  "```tsx",
+                  existingPageContent.substring(0, 8000), // 限制长度避免 token 超限
+                  existingPageContent.length > 8000 ? "\n// ... 代码过长已截断 ..." : "",
+                  "```",
+                  ""
+                ].join("\n");
+              }
+
               const uiPrompt = [
                 "你是前端工程规格生成器。",
                 "",
                 "将需求转换为【可直接编码的工程规格】，前端 Agent 会根据这个规格生成代码。",
+                existingPageContent ? "\n⚠️ **重要：这是对现有页面的修改，必须保留所有现有功能和布局！**\n" : "",
+                "====================",
+                "可用的 shadcn/ui 组件库",
+                "====================",
+                "项目已集成 shadcn/ui，必须优先使用以下现有组件，不要重复造轮子：",
+                "",
+                "**布局类**: Card, Accordion, Collapsible, Tabs, Separator, Resizable, ScrollArea, AspectRatio",
+                "**表单类**: Button, Input, Textarea, Checkbox, RadioGroup, Select, Switch, Slider, Form, Field, Label, InputOTP, InputGroup",
+                "**反馈类**: Alert, AlertDialog, Dialog, Drawer, Sheet, Popover, HoverCard, Tooltip, Sonner(toast), Progress, Skeleton, Spinner, Empty",
+                "**导航类**: Breadcrumb, NavigationMenu, Menubar, DropdownMenu, ContextMenu, Command, Pagination, Sidebar",
+                "**数据展示类**: Avatar, Badge, Table, Calendar, Carousel, Chart, Kbd",
+                "**交互类**: Toggle, ToggleGroup, ButtonGroup",
+                "",
+                "导入方式: import { ComponentName } from '@/components/ui/component-name'",
                 "",
                 "====================",
                 "需求",
                 "====================",
                 compiledRequirement,
+                existingPageContext,
                 "",
                 "====================",
                 "输出格式（严格遵循，不要添加其他章节）",
@@ -238,19 +322,34 @@ jobs:
                 "",
                 "## 目标页面",
                 "- 路径：frontend/app/xxx/page.tsx",
-                "- 如果是 MODIFY_PAGE，说明要保留哪些现有功能",
+                "- 如果是 MODIFY_PAGE，必须详细说明要保留的现有功能",
+                "",
+                "## 现有功能清单（仅 MODIFY_PAGE 需要）",
+                "如果是修改现有页面，必须列出：",
+                "- 【保留】现有组件1: 功能描述",
+                "- 【保留】现有组件2: 功能描述", 
+                "- 【保留】现有布局结构: 描述",
+                "- 【新增】新功能: 描述",
+                "",
+                "## shadcn/ui 组件使用",
+                "列出需要使用的 shadcn/ui 组件及用途：",
+                "- Button: 用于提交/操作按钮",
+                "- Card: 用于内容卡片展示",
+                "- Dialog: 用于弹窗确认",
+                "- ...",
                 "",
                 "## 文件结构",
                 "列出需要创建/修改的文件：",
                 "- frontend/app/xxx/page.tsx（页面）",
-                "- frontend/components/xxx.tsx（组件）",
+                "- frontend/components/xxx.tsx（业务组件，组合 shadcn/ui 组件）",
                 "",
                 "## 组件清单",
-                "每个组件用以下格式：",
+                "每个【业务组件】用以下格式（不需要列出 shadcn/ui 基础组件）：",
                 "",
                 "### ComponentName",
                 "- 文件: frontend/components/xxx.tsx",
                 "- 功能: 一句话描述这个组件做什么",
+                "- 使用的 shadcn/ui 组件: Button, Card, Input 等",
                 "- Props: { propName: type }",
                 "- State: { stateName: type }",
                 "- 事件: onClick/onSubmit 等触发什么",
@@ -279,12 +378,21 @@ jobs:
                 "规则",
                 "====================",
                 "- 只输出工程规格，不要写代码",
+                "- **必须优先使用 shadcn/ui 组件，禁止重复实现已有组件的功能**",
                 "- 文件结构中必须包含 frontend/app/page.tsx",
                 "- 页面组装部分必须明确说明如何在 page.tsx 中使用组件",
                 "- 不要写'交互哲学'、'设计理念'等描述性文字",
                 "- 不要描述功能，直接定义组件和接口",
                 "- 不要生成 demo/示例/演示 相关内容",
-                "- 输出的规格必须足够具体，让代码 Agent 无需再做决策"
+                "- 输出的规格必须足够具体，让代码 Agent 无需再做决策",
+                "",
+                "**【MODIFY_PAGE 特殊规则 - 必须遵守】**",
+                "- 如果是修改现有页面，必须先分析现有代码结构",
+                "- 禁止删除或修改现有功能，只能新增",
+                "- 必须保留现有的布局结构和组件层级",
+                "- 新功能应该「插入」到现有结构中，而不是「替换」",
+                "- 在组件清单中用【保留】【新增】标签区分",
+                "- 如果现有代码使用了某个组件/样式/模式，新代码也应该保持一致"
               ].join("\n");
 
               const uiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {

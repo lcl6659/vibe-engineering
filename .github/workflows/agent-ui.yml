@@ -28,101 +28,290 @@ jobs:
         with:
           script: |
             async function runUIAgent() {
-              const prompt = `
-                You are the Product UI Architect Agent for this repository.
-                
-                Your mission is to transform a PRD into a production-ready UI and interaction specification
-                that frontend engineers or agents can implement WITHOUT further design decisions.
-                
-                ====================
-                PRD TITLE:
-                ${process.env.ISSUE_TITLE}
-                
-                PRD BODY:
-                ${process.env.ISSUE_BODY}
-                ====================
-                
-                You must work in the following order:
-                1. Extract interaction philosophy from the PRD.
-                2. Define interaction style and behavioral constraints.
-                3. Translate them into an engineering-ready UI specification.
-                4. Produce a strict UI freeze contract to guarantee implementability.
-                
-                --------------------
-                OUTPUT FORMAT (STRICT)
-                --------------------
-                
-                ## Interaction Philosophy
-                
-                ## Interaction Style & Preferences
-                
-                ## Page Layout
-                - Tree structure only
-                
-                ## Components
-                For each component:
-                - Responsibility
-                - Interaction
-                - States
-                
-                ## Interaction Flow
-                - Linear numbered steps
-                - User action → system reaction
-                
-                ## UI States
-                - Enumerated finite states only
-                
-                ## UI Freeze Contract
-                
-                --------------------
-                RULES (NON-NEGOTIABLE)
-                --------------------
-                - Do NOT write code
-                - Do NOT specify visual styles, colors, spacing, typography, or sizing (handled by design system)
-                - Do NOT design backend APIs or data models
-                - Frontend will use existing design system (shadcn/ui + Tailwind)
-                - Focus ONLY on interaction logic, component structure, and state management
-                - Do NOT add extra sections beyond the required format
-                `;
+              const owner = context.repo.owner;
+              const repo = context.repo.repo;
+              const issue_number = context.issue.number;
+              const commentBody = context.payload.comment.body || "";
 
-              const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              // 提取用户额外指令
+              const userExtra = commentBody
+                .replace(/\/agent-ui\b/i, "")
+                .replace(/\/agent ui\b/i, "")
+                .trim();
+
+              const pmRaw = [
+                "PRD TITLE:",
+                process.env.ISSUE_TITLE || "",
+                "",
+                "PRD BODY:",
+                process.env.ISSUE_BODY || ""
+              ].join("\n");
+
+              // ==================== Step 1: PM Compiler ====================
+              console.log("Step 1: 运行 PM Compiler，将 PRD 转换为 AI 可执行指令...");
+              
+              const pmPrompt = [
+                "你是一个【需求编译器（PM Requirement Compiler）】。",
+                "",
+                "你的职责不是"理解需求"，而是将【人类 PM 编写的需求文本】转换为【AI 可执行、不可歧义的指令合同】。",
+                "你必须假设原始 PM 文档可能不完整、可能存在歧义、可能混合目标/方案/实现猜测。",
+                "",
+                "你的目标：",
+                "- 消除歧义",
+                "- 冻结事实",
+                "- 明确禁止项",
+                "- 生成一个"下游 Agent 不需要再做设计决策"的执行 Prompt",
+                "- 不得新增原需求里不存在的新功能",
+                "",
+                "====================",
+                "输入（PM 原始需求）",
+                "====================",
+                pmRaw,
+                "",
+                userExtra ? "====================\n用户额外指令\n====================\n" + userExtra + "\n" : "",
+                "====================",
+                "强制处理步骤",
+                "====================",
+                "Step 1：提取【产品目标】（一句话，不含方案细节）",
+                "Step 2：提取【核心用户动作】（用户做什么 → 系统必须发生什么）",
+                "Step 3：冻结【输入规则】（位置/形式/数量限制）",
+                "Step 4：冻结【输出规则】（形态/位置/结构/顺序约束）",
+                "Step 5：冻结【角色职责】（LLM 生成范围、是否允许系统绕过 LLM）",
+                "Step 6：生成【禁止行为列表】（AI 绝对不能做的事）",
+                "Step 7：生成【异常与边界规则】（失败时用户可见提示）",
+                "Step 8：处理【歧义】（选择一种最保守解释并记录，不得保留多解）",
+                "",
+                "====================",
+                "输出格式（严格）",
+                "====================",
+                "必须严格按照以下结构输出 JSON，不得新增或删减字段：",
+                "",
+                "{",
+                '  "product_goal": "产品目标（一句话）",',
+                '  "user_actions": ["用户动作1 → 系统反应", "用户动作2 → 系统反应"],',
+                '  "input_rules": ["输入规则1", "输入规则2"],',
+                '  "output_rules": ["输出规则1", "输出规则2"],',
+                '  "ui_facts": ["UI事实1", "UI事实2"],',
+                '  "llm_responsibilities": ["LLM职责1", "LLM职责2"],',
+                '  "forbidden_actions": ["禁止行为1", "禁止行为2"],',
+                '  "edge_cases": ["异常处理1", "异常处理2"],',
+                '  "disambiguation_notes": ["歧义处理说明1", "歧义处理说明2"]',
+                "}",
+                "",
+                "只返回 JSON，不要其他内容。"
+              ].join("\n");
+
+              const pmRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
                 headers: {
-                  "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                  "Authorization": "Bearer " + process.env.OPENROUTER_API_KEY,
                   "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                  model: "google/gemini-3-flash-preview",
-                  messages: [{ role: "user", content: prompt }],
-                  temperature: 0.6
+                  model: "google/gemini-2.5-flash-preview",
+                  messages: [{ role: "user", content: pmPrompt }],
+                  temperature: 0.3
                 })
               });
 
-              const data = await res.json();
-              if (!data.choices || !data.choices[0]) {
-                throw new Error("UI Agent returned invalid response");
+              if (!pmRes.ok) {
+                const err = await pmRes.text();
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number,
+                  body: "❌ **PM Compiler 请求失败**\n\nHTTP: " + pmRes.status + "\n\n```\n" + err.substring(0, 1500) + "\n```"
+                });
+                throw new Error("PM Compiler failed: " + pmRes.status);
               }
 
-              const uiSpec = data.choices[0].message.content;
+              const pmData = await pmRes.json();
+              const pmRawContent = pmData?.choices?.[0]?.message?.content || "";
+              
+              // 解析 PM Compiler 输出的 JSON
+              let pmResult;
+              try {
+                let jsonStr = pmRawContent.trim();
+                const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+                if (jsonMatch) {
+                  jsonStr = jsonMatch[1].trim();
+                } else {
+                  const firstBrace = jsonStr.indexOf("{");
+                  const lastBrace = jsonStr.lastIndexOf("}");
+                  if (firstBrace !== -1 && lastBrace !== -1) {
+                    jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+                  }
+                }
+                pmResult = JSON.parse(jsonStr);
+                console.log("✅ PM Compiler 输出解析成功");
+              } catch (e) {
+                console.error("PM Compiler JSON 解析失败，使用原始文本");
+                pmResult = { raw: pmRawContent };
+              }
 
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: [
-                  "🧩 UI Agent Output (Frozen UI Spec)",
+              // ==================== Step 2: UI Spec Generator ====================
+              console.log("Step 2: 运行 UI Spec Generator，生成 Frozen UI Spec...");
+
+              // 格式化 PM 结果为 UI Agent 可用的输入
+              let compiledRequirement;
+              if (pmResult.raw) {
+                compiledRequirement = pmRawContent;
+              } else {
+                compiledRequirement = [
+                  "## 产品目标",
+                  pmResult.product_goal || "未定义",
                   "",
-                  uiSpec,
+                  "## 核心用户动作",
+                  (pmResult.user_actions || []).map((a, i) => (i + 1) + ". " + a).join("\n"),
+                  "",
+                  "## 输入规则",
+                  (pmResult.input_rules || []).map(r => "- " + r).join("\n"),
+                  "",
+                  "## 输出规则",
+                  (pmResult.output_rules || []).map(r => "- " + r).join("\n"),
+                  "",
+                  "## UI 事实",
+                  (pmResult.ui_facts || []).map(f => "- " + f).join("\n"),
+                  "",
+                  "## LLM 职责",
+                  (pmResult.llm_responsibilities || []).map(r => "- " + r).join("\n"),
+                  "",
+                  "## 禁止行为",
+                  (pmResult.forbidden_actions || []).map(f => "- " + f).join("\n"),
+                  "",
+                  "## 异常与边界",
+                  (pmResult.edge_cases || []).map(e => "- " + e).join("\n"),
+                  "",
+                  "## 歧义处理说明",
+                  (pmResult.disambiguation_notes || []).map(n => "- " + n).join("\n")
+                ].join("\n");
+              }
+
+              const uiPrompt = [
+                "你是 Product UI Architect Agent。",
+                "",
+                "你的任务是将【已编译的 AI 可执行需求】转换为【生产就绪的 UI 交互规格】。",
+                "前端工程师或 Agent 可以直接按此规格实现，无需再做设计决策。",
+                "",
+                "====================",
+                "已编译的需求（AI EXECUTION PROMPT）",
+                "====================",
+                compiledRequirement,
+                "",
+                "====================",
+                "输出格式（严格）",
+                "====================",
+                "",
+                "## 交互哲学",
+                "（一句话描述核心交互理念）",
+                "",
+                "## 交互风格与偏好",
+                "（列出 3-5 条交互行为约束）",
+                "",
+                "## 页面布局",
+                "（使用树结构描述页面层级，用缩进表示嵌套关系）",
+                "",
+                "## 组件规格",
+                "（对于每个组件，必须包含：）",
+                "",
+                "### [组件名称]",
+                "- **职责**: 该组件的唯一职责",
+                "- **交互**: 用户如何与之交互",
+                "- **状态**: 组件的所有可能状态",
+                "- **Props**: 组件接收的数据（如适用）",
+                "",
+                "## 交互流程",
+                "（线性编号步骤，格式：用户操作 → 系统反应）",
+                "",
+                "1. 用户 [动作] → 系统 [反应]",
+                "2. ...",
+                "",
+                "## UI 状态枚举",
+                "（列出所有有限状态，格式：状态名 | 触发条件 | 用户可见变化）",
+                "",
+                "| 状态 | 触发条件 | 用户可见变化 |",
+                "|------|----------|--------------|",
+                "| ... | ... | ... |",
+                "",
+                "## UI 冻结契约",
+                "（列出不可更改的 UI 决策）",
+                "",
+                "- [ ] 决策1",
+                "- [ ] 决策2",
+                "",
+                "====================",
+                "规则（不可协商）",
+                "====================",
+                "- 禁止写代码",
+                "- 禁止指定视觉样式（颜色、间距、字体、尺寸）- 由设计系统处理",
+                "- 禁止设计后端 API 或数据模型",
+                "- 只关注交互逻辑、组件结构、状态管理",
+                "- 禁止添加格式之外的章节"
+              ].join("\n");
+
+              const uiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Authorization": "Bearer " + process.env.OPENROUTER_API_KEY,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  model: "google/gemini-2.5-flash-preview",
+                  messages: [{ role: "user", content: uiPrompt }],
+                  temperature: 0.5
+                })
+              });
+
+              if (!uiRes.ok) {
+                const err = await uiRes.text();
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number,
+                  body: "❌ **UI Spec Generator 请求失败**\n\nHTTP: " + uiRes.status + "\n\n```\n" + err.substring(0, 1500) + "\n```"
+                });
+                throw new Error("UI Spec Generator failed: " + uiRes.status);
+              }
+
+              const uiData = await uiRes.json();
+              const uiSpec = uiData?.choices?.[0]?.message?.content || "";
+
+              if (!uiSpec.trim()) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number,
+                  body: "❌ **UI Spec Generator 返回为空**\n\n模型没有返回有效内容，请重试。"
+                });
+                throw new Error("UI Spec Generator returned empty content.");
+              }
+
+              // ==================== Step 3: Post Result ====================
+              await github.rest.issues.createComment({
+                owner, repo, issue_number,
+                body: [
+                  "🧩 **UI Agent Output (Frozen UI Spec)**",
                   "",
                   "---",
                   "",
-                  "UI Freeze Notice:",
-                  "- Interaction philosophy is frozen for this Issue",
-                  "- Layout hierarchy is frozen",
-                  "- Frontend Agent may only bind data and manage state",
-                  "- Backend Agent must not assume UI changes"
+                  "## 📋 Step 1: 需求编译结果",
+                  "",
+                  compiledRequirement,
+                  "",
+                  "---",
+                  "",
+                  "## 🎨 Step 2: UI 交互规格",
+                  "",
+                  uiSpec.trim(),
+                  "",
+                  "---",
+                  "",
+                  "**UI Freeze Notice:**",
+                  "- ✅ 需求已编译为 AI 可执行指令",
+                  "- ✅ 交互哲学和布局层级已冻结",
+                  "- ✅ Frontend Agent 只需绑定数据和管理状态",
+                  "- ✅ 视觉样式由设计系统（shadcn/ui + Tailwind）处理",
+                  "",
+                  "**Next Step:**",
+                  "复制此评论 URL，然后执行 `/agent-fe <此评论URL>` 生成前端代码"
                 ].join("\n")
               });
+
+              console.log("✅ UI Agent 完成");
             }
 
             await runUIAgent();

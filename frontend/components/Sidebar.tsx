@@ -3,7 +3,7 @@
 import React, { Dispatch, SetStateAction } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Youtube, ListMusic, Subtitles, ShieldCheck } from "lucide-react";
+import { Youtube, ListMusic, Subtitles, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import QuotaMonitor from "./QuotaMonitor";
 
@@ -17,7 +17,6 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const useLocalState = activeTab !== undefined && onTabChange !== undefined;
 
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, href: '/dashboard' },
     { id: 'video', label: 'Video Info', icon: Youtube, href: '/video' },
     { id: 'playlist', label: 'Playlist', icon: ListMusic, href: '/playlist' },
     { id: 'captions', label: 'Captions', icon: Subtitles, href: '/captions' },
@@ -26,7 +25,7 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
 
   return (
     <aside className="w-64 hidden md:flex flex-col h-screen sticky top-0 bg-background border-r border-border/50 p-6">
-      <Link href="/dashboard" className="flex items-center gap-3 mb-12 hover:opacity-80 transition-opacity">
+      <Link href="/" className="flex items-center gap-3 mb-12 hover:opacity-80 transition-opacity">
         <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
           <span className="text-primary-foreground font-black text-sm">V</span>
         </div>

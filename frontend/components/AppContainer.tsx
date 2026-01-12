@@ -89,13 +89,13 @@ export default function AppContainer() {
           </p>
 
           <div className="pt-4 animate-fade-in-up" style={{ animationDelay: '250ms' }}>
-            <Link href="/dashboard">
+            <Link href="/video">
               <Button
                 variant="secondary"
                 className="rounded-full px-8 h-12 border-0 bg-secondary hover:bg-secondary/80 text-primary font-semibold"
               >
                 <Database className="h-4 w-4 mr-2" />
-                Open Data Dashboard
+                Open Video Tool
               </Button>
             </Link>
           </div>

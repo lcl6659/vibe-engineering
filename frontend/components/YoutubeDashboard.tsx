@@ -8,9 +8,11 @@ import AuthPanel from "./AuthPanel";
 import { youtubeApi } from "@/lib/api/endpoints";
 import { YoutubeMetadata, PlaylistVideo, CaptionTrack } from "@/types/video";
 import { toast } from "@/lib/utils/toast";
+import { extractVideoId, extractPlaylistId, isValidVideoInput, isValidPlaylistInput } from "@/lib/utils/youtube";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, FileText, ListVideo } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export default function YoutubeDashboard() {
   const [activeTab, setActiveTab] = useState('video');
@@ -26,20 +28,40 @@ export default function YoutubeDashboard() {
     if (!query.trim()) return;
     setLoading(true);
     setError(null);
-    
+
     try {
       if (activeTab === 'video') {
+        // Video API can handle full URLs or IDs
         const data = await youtubeApi.getVideo(query);
         setVideoData(data);
       } else if (activeTab === 'playlist') {
-        const data = await youtubeApi.getPlaylist(query);
+        // Extract playlist ID from URL or use direct ID
+        const playlistId = extractPlaylistId(query);
+        if (!playlistId) {
+          setError("Invalid playlist URL or ID. Please enter a valid YouTube playlist link.");
+          toast.error("Invalid playlist URL or ID");
+          setLoading(false);
+          return;
+        }
+        const data = await youtubeApi.getPlaylist(playlistId);
         setPlaylistData(data.items);
       } else if (activeTab === 'captions') {
-        const data = await youtubeApi.getCaptions(query);
+        // Extract video ID from URL or use direct ID
+        const videoId = extractVideoId(query);
+        if (!videoId) {
+          setError("Invalid video URL or ID. Please enter a valid YouTube video link.");
+          toast.error("Invalid video URL or ID");
+          setLoading(false);
+          return;
+        }
+        const data = await youtubeApi.getCaptions(videoId);
         setCaptionData(data.captions);
       }
     } catch (e: any) {
-      const msg = e.status === 404 ? "Resource not found" : e.status === 429 ? "API Quota exhausted" : "Failed to fetch data";
+      const msg = e.status === 401 ? "Authorization required. Please authenticate with Google." :
+                  e.status === 404 ? "Resource not found" :
+                  e.status === 429 ? "API Quota exhausted" :
+                  "Failed to fetch data";
       setError(msg);
       toast.error(msg);
     } finally {
@@ -74,7 +96,13 @@ export default function YoutubeDashboard() {
                 onSearch={handleSearch}
                 loading={loading}
                 error={!!error}
-                placeholder={activeTab === 'playlist' ? "Enter Playlist ID..." : "Enter Video URL or ID..."}
+                placeholder={
+                  activeTab === 'playlist'
+                    ? "Enter playlist URL or ID (e.g., PLxxx...)"
+                    : activeTab === 'captions'
+                    ? "Enter video URL or ID (e.g., dQw4w9WgXcQ)"
+                    : "Enter YouTube video URL or ID"
+                }
               />
 
               {error && (

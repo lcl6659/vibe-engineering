@@ -8,9 +8,10 @@ interface ContentCardProps {
   data: CardData;
   loading?: boolean;
   error?: string;
+  onRetry?: (id: string, url: string) => void;
 }
 
-export default function ContentCard({ data, loading, error }: ContentCardProps) {
+export default function ContentCard({ data, loading, error, onRetry }: ContentCardProps) {
   if (loading) {
     return (
       <Card className="w-full overflow-hidden border-0 shadow-xl rounded-[2rem] bg-background">
@@ -39,16 +40,26 @@ export default function ContentCard({ data, loading, error }: ContentCardProps) 
             <p className="font-bold text-lg text-destructive">Parsing Failed</p>
             <p className="text-sm text-muted-foreground max-w-xs">{error || "We couldn't process this URL. Please check if it's a valid YouTube or Twitter link."}</p>
           </div>
-          {data?.url && (
-            <a 
-              href={data.url} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-sm font-medium text-primary hover:underline transition-all"
-            >
-              View Original Link →
-            </a>
-          )}
+          <div className="flex gap-3 items-center">
+            {data?.url && (
+              <a 
+                href={data.url} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-sm font-medium text-primary hover:underline transition-all"
+              >
+                View Original Link →
+              </a>
+            )}
+            {onRetry && data?.id && data?.url && (
+              <button
+                onClick={() => onRetry(data.id, data.url)}
+                className="text-sm font-medium text-primary hover:underline transition-all"
+              >
+                Retry
+              </button>
+            )}
+          </div>
         </CardContent>
       </Card>
     );

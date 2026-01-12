@@ -25,6 +25,7 @@ func NewOAuthService(clientID, clientSecret, redirectURL string, log *zap.Logger
 		RedirectURL:  redirectURL,
 		Scopes: []string{
 			youtube.YoutubeReadonlyScope,
+			youtube.YoutubeForceSslScope, // Required for Captions API access
 		},
 		Endpoint: google.Endpoint,
 	}

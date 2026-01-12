@@ -17,7 +17,8 @@
       "Bash(jq -c . echo -e \"\\\\n2. POST /api/v1/auth/google/callback\" curl -s -X POST -H \"Content-Type: application/json\" -d '{\"\"\"\"code\"\"\"\":\"\"\"\"test\"\"\"\"}' \"https://vibe-engineering-playbook-production-f716.up.railway.app/api/v1/auth/google/callback\" echo -e \"\\\\n3. GET /api/v1/youtube/video\" curl -s \"https://vibe-engineering-playbook-production-f716.up.railway.app/api/v1/youtube/video?input=test\")",
       "Bash(jq -c . echo -e \"\\\\n4. POST /api/v1/videos/metadata\" curl -s -X POST -H \"Content-Type: application/json\" -d '{\"\"\"\"url\"\"\"\":\"\"\"\"test\"\"\"\"}' \"https://vibe-engineering-playbook-production-f716.up.railway.app/api/v1/videos/metadata\")",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nfix: Force Railway rebuild with v4 cache to fix OAuth callback 404\n\nRailway appears to be serving an old cached version that doesn''t include\nthe POST /api/v1/auth/google/callback route. This commit:\n\n1. Updates cache ID from v3 to v4 to force complete rebuild\n2. Updates build timestamp to v4\n3. Updates health check version to v6-oauth-callback-fix for verification\n\nThe route exists in code \\(router.go:88\\) but deployed service returns 404.\nTesting shows GET /api/v1/auth/google/url works but POST callback doesn''t,\nconfirming it''s a stale deployment issue.\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

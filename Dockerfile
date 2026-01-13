@@ -26,12 +26,12 @@ RUN apt-get update && apt-get install -y \
 
 COPY --from=build /go/bin/server /server
 COPY --from=build /go/src/vibe-backend/migrations /migrations
-COPY entrypoint.sh /entrypoint.sh
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Ensure executables have correct permissions
-RUN chmod +x /server /entrypoint.sh
+RUN chmod +x /server /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8080
 
 # Use shell script entrypoint for better logging
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["docker-entrypoint.sh"]

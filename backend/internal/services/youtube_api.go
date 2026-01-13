@@ -198,14 +198,23 @@ func (s *YouTubeAPIService) GetCaptions(ctx context.Context, videoID string, tok
 	}
 
 	// Captions API requires OAuth
-	if token == nil {
+	if token == nil || token.AccessToken == "" {
 		return nil, fmt.Errorf("UNAUTHORIZED: OAuth authorization required to access captions")
 	}
 
+	s.log.Debug("Creating YouTube service with OAuth token",
+		zap.String("video_id", videoID),
+		zap.Bool("has_token", token.AccessToken != ""),
+	)
+
 	// Create YouTube service with OAuth token
-	client := s.oauthService.config.Client(ctx, token)
+	// Use oauth2.StaticTokenSource to create a client that just uses the access token
+	// This works even without GOOGLE_CLIENT_ID/SECRET configured
+	tokenSource := oauth2.StaticTokenSource(token)
+	client := oauth2.NewClient(ctx, tokenSource)
 	service, err := youtube.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
+		s.log.Error("Failed to create YouTube service", zap.Error(err))
 		return nil, fmt.Errorf("failed to create YouTube service: %w", err)
 	}
 

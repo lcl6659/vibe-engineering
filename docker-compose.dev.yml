@@ -45,6 +45,11 @@ services:
       - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - GEMINI_MODEL=${GEMINI_MODEL:-google/gemini-3-flash-preview}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+      # Google OAuth 2.0 配置 (Captions API 需要)
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL:-http://localhost:3000/auth/google/callback}
     volumes:
       # 挂载源代码，代码变化会立即反映到容器中
       - ./backend:/go/src/vibe-backend

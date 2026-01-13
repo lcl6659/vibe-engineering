@@ -106,6 +106,57 @@ func (h *YouTubeAPIHandler) HandleCallback(c *gin.Context) {
 	})
 }
 
+// RefreshToken refreshes an expired OAuth token.
+// POST /api/v1/auth/google/refresh
+func (h *YouTubeAPIHandler) RefreshToken(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refreshToken" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Code:    models.ErrorInvalidInput,
+			Message: "Refresh token 不能为空",
+		})
+		return
+	}
+
+	// Refresh the token using OAuth service
+	token, err := h.oauthService.RefreshToken(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		h.log.Error("Failed to refresh token",
+			zap.Error(err),
+		)
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Code:    models.ErrorAuthFailed,
+			Message: "Token 刷新失败，请重新登录",
+		})
+		return
+	}
+
+	// Convert token to JSON for storage
+	tokenJSON, err := h.oauthService.TokenToJSON(token)
+	if err != nil {
+		h.log.Error("Failed to serialize refreshed token",
+			zap.Error(err),
+		)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Code:    models.ErrorAuthFailed,
+			Message: "Token 刷新失败，请重新登录",
+		})
+		return
+	}
+
+	// Return new token to client
+	c.JSON(http.StatusOK, models.OAuthCallbackResponse{
+		AccessToken:  token.AccessToken,
+		RefreshToken: token.RefreshToken,
+		TokenType:    token.TokenType,
+		Expiry:       token.Expiry,
+		TokenJSON:    tokenJSON,
+	})
+}
+
 // GetVideoMetadata fetches video metadata.
 // GET /api/v1/youtube/video?input=<url-or-id>
 func (h *YouTubeAPIHandler) GetVideoMetadata(c *gin.Context) {

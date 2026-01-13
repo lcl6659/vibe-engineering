@@ -52,6 +52,7 @@ export default function GoogleCallbackPage() {
         // Store token in localStorage
         localStorage.setItem('google_oauth_token', response.tokenJSON);
         localStorage.setItem('google_access_token', response.accessToken);
+        localStorage.setItem('google_refresh_token', response.refreshToken);
         localStorage.setItem('google_token_expiry', response.expiry);
 
         setStatus('success');

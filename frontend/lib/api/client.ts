@@ -24,6 +24,64 @@ function buildQueryString(
 }
 
 /**
+ * 检查 Google OAuth token 是否过期
+ */
+function isGoogleTokenExpired(): boolean {
+  const expiry = localStorage.getItem("google_token_expiry");
+  if (!expiry) return false;
+
+  try {
+    const expiryDate = new Date(expiry);
+    const now = new Date();
+    // 提前 5 分钟刷新 token，避免在请求过程中过期
+    const bufferTime = 5 * 60 * 1000; // 5 minutes in milliseconds
+    return expiryDate.getTime() - now.getTime() < bufferTime;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 刷新 Google OAuth token
+ */
+async function refreshGoogleToken(): Promise<void> {
+  const refreshToken = localStorage.getItem("google_refresh_token");
+  if (!refreshToken) {
+    throw new Error("No refresh token available");
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_PATH}/v1/auth/google/refresh`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refreshToken }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to refresh token");
+    }
+
+    const data = await response.json();
+
+    // 更新存储的 token
+    localStorage.setItem("google_oauth_token", data.tokenJSON);
+    localStorage.setItem("google_access_token", data.accessToken);
+    localStorage.setItem("google_refresh_token", data.refreshToken);
+    localStorage.setItem("google_token_expiry", data.expiry);
+  } catch (error) {
+    console.error("Token refresh failed:", error);
+    // 清除过期的 token
+    localStorage.removeItem("google_oauth_token");
+    localStorage.removeItem("google_access_token");
+    localStorage.removeItem("google_refresh_token");
+    localStorage.removeItem("google_token_expiry");
+    throw error;
+  }
+}
+
+/**
  * 构建请求头
  */
 function buildHeaders(customHeaders?: Record<string, string>): HeadersInit {
@@ -116,6 +174,20 @@ class ApiClient {
       timeout = API_TIMEOUT,
       signal,
     } = options;
+
+    // 检查并刷新 Google OAuth token（如果需要且不是刷新 token 请求本身）
+    if (
+      endpoint !== "/v1/auth/google/refresh" &&
+      localStorage.getItem("google_access_token") &&
+      isGoogleTokenExpired()
+    ) {
+      try {
+        await refreshGoogleToken();
+      } catch (error) {
+        console.error("Failed to refresh token before request:", error);
+        // 继续请求，让服务器返回 401 错误
+      }
+    }
 
     // 构建 URL
     const url = `${API_BASE_PATH}${endpoint}${

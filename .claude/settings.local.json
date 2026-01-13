@@ -18,7 +18,11 @@
       "Bash(jq -c . echo -e \"\\\\n4. POST /api/v1/videos/metadata\" curl -s -X POST -H \"Content-Type: application/json\" -d '{\"\"\"\"url\"\"\"\":\"\"\"\"test\"\"\"\"}' \"https://vibe-engineering-playbook-production-f716.up.railway.app/api/v1/videos/metadata\")",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nfix: Force Railway rebuild with v4 cache to fix OAuth callback 404\n\nRailway appears to be serving an old cached version that doesn''t include\nthe POST /api/v1/auth/google/callback route. This commit:\n\n1. Updates cache ID from v3 to v4 to force complete rebuild\n2. Updates build timestamp to v4\n3. Updates health check version to v6-oauth-callback-fix for verification\n\nThe route exists in code \\(router.go:88\\) but deployed service returns 404.\nTesting shows GET /api/v1/auth/google/url works but POST callback doesn''t,\nconfirming it''s a stale deployment issue.\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git push:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(lsof:*)",
+      "Bash(TOKEN=\"ya29.A0AUMWg_LUs0zFmDRL55zsA000kBfnXkLlBQzbWGgDOXr3ZUH6oO1qXSIRCIK7-_FdcLDd64hLg_DyRyedsjnp_PV8u5ipvJ3iRclYAWwWhaZyIT8aLf3cSG-1ikdBtLkBpsezicCm4vcvk1ksCP84r-MpQll6jfNfjCp6MbZ1zqllE6-kZBTH5jb6kgCeoOsIBDUZNHiJGKaxzwawlLECpnc1FfldETv3J3JMa5kktPo94I2fzGCLUGd8iuxmXvmAQxP88t5HUg1cvVQJhKgBLNEeiqalWBEaCgYKAUISARISFQHGX2Mi9Ys9Sy4ad571mdPhB2HDig0294\")",
+      "Bash(ls:*)",
+      "Bash(go version:*)"
     ]
   }
 }

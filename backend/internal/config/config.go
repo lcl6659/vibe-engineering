@@ -13,8 +13,8 @@ type Config struct {
 	// Database configuration (PostgreSQL)
 	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgresql://postgres:ZEWZMzkHcPGIgtzcIcyJZstIAWGkUZdP@postgres.railway.internal:5432/railway"`
 
-	// Cache configuration (Redis)
-	RedisURL string `env:"REDIS_URL" envDefault:"redis://default:GhJbhiRbqKkwmPtnCqUBCnTdCdRlsIwL@redis.railway.internal:6379"`
+	// Cache configuration (Redis) - using public URL due to Railway private network issues
+	RedisURL string `env:"REDIS_URL" envDefault:"redis://default:GhJbhiRbqKkwmPtnCqUBCnTdCdRlsIwL@switchyard.proxy.rlwy.net:49758"`
 
 	// Logging configuration
 	LogLevel string `env:"LOG_LEVEL" envDefault:"info"`

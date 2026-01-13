@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -36,24 +34,10 @@ type HealthResponse struct {
 
 // Health returns basic health status (for load balancer).
 func (h *HealthHandler) Health(c *gin.Context) {
-	// #region agent log
-	if f, err := os.OpenFile("/Users/xiaozihao/Documents/01_Projects/Work_Code/work/Team_AI/vibe-engineering-playbook/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		json.NewEncoder(f).Encode(map[string]interface{}{
-			"sessionId":    "debug-session",
-			"runId":        "startup-debug",
-			"hypothesisId": "A,B,C,D,E",
-			"location":     "health.go:36",
-			"message":      "Health endpoint called",
-			"data":         map[string]interface{}{"method": c.Request.Method, "path": c.Request.URL.Path},
-			"timestamp":    time.Now().UnixMilli(),
-		})
-		f.Close()
-	}
-	// #endregion
 	c.JSON(http.StatusOK, HealthResponse{
 		Status:    "ok",
 		Timestamp: time.Now().UTC(),
-		Version:   "2026-01-13-v11-root-dockerfile",
+		Version:   "2026-01-13-v12-clean-health",
 	})
 }
 

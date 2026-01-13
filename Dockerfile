@@ -1,5 +1,5 @@
 # Railway Docker Build - yt-dlp transcript support
-# v11 - root level Dockerfile
+# REBUILD v13 - 2026-01-13 17:25 - Force cache bust with entrypoint
 FROM golang:1.24 AS build
 
 WORKDIR /go/src/vibe-backend

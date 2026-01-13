@@ -1,5 +1,8 @@
 FROM golang:1.24 AS build
 
+# Force rebuild when this changes - 2026-01-13-v7
+ARG BUILD_VERSION=2026-01-13-v7-transcript-yt-dlp
+
 WORKDIR /go/src/vibe-backend
 
 COPY backend/ .
@@ -14,13 +17,17 @@ RUN --mount=type=cache,id=s/3a2cccef-6f6d-4cb8-aaaf-a49ddec22628-/go/pkg/mod,tar
 
 FROM debian:bookworm-slim
 
-# Install yt-dlp and dependencies
+# Build version for cache busting
+ARG BUILD_VERSION=2026-01-13-v7-transcript-yt-dlp
+LABEL build.version="${BUILD_VERSION}"
+
+# Install yt-dlp and dependencies for YouTube transcript extraction
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     ffmpeg \
     ca-certificates \
-    && pip3 install --no-cache-dir yt-dlp \
+    && pip3 install --break-system-packages --no-cache-dir yt-dlp \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

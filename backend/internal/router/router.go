@@ -52,6 +52,10 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 	youtubeService := services.NewYouTubeService(cfg.OpenRouterAPIKey, cfg.GeminiModel, log)
 	videoHandler := handlers.NewVideoHandler(videoRepo, youtubeService, log)
 
+	// InsightFlow handlers
+	insightRepo := repository.NewInsightRepository(db.DB)
+	insightHandler := handlers.NewInsightHandler(insightRepo, log)
+
 	// YouTube Data API v3 handlers (OAuth + API endpoints)
 	oauthService := services.NewOAuthService(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL, log)
 	youtubeAPIService := services.NewYouTubeAPIService(cfg.YouTubeAPIKey, cache, oauthService, log)
@@ -116,6 +120,30 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 
 			// Transcript extraction endpoint (yt-dlp based)
 			v1.POST("/transcript", transcriptHandler.GetTranscript)
+
+			// InsightFlow routes
+			insights := v1.Group("/insights")
+			{
+				insights.GET("", insightHandler.List)
+				insights.POST("", insightHandler.Create)
+				insights.GET("/:id", insightHandler.Get)
+				insights.PATCH("/:id", insightHandler.Update)
+				insights.DELETE("/:id", insightHandler.Delete)
+
+				// Highlight routes
+				insights.GET("/:id/highlights", insightHandler.ListHighlights)
+				insights.POST("/:id/highlights", insightHandler.CreateHighlight)
+				insights.PATCH("/:id/highlights/:highlightId", insightHandler.UpdateHighlight)
+				insights.DELETE("/:id/highlights/:highlightId", insightHandler.DeleteHighlight)
+
+				// Chat routes
+				insights.GET("/:id/chat", insightHandler.ListChatMessages)
+				insights.POST("/:id/chat", insightHandler.CreateChatMessage)
+				insights.DELETE("/:id/chat", insightHandler.ClearChatHistory)
+			}
+
+			// Shared insight (public access)
+			v1.GET("/shared/:token", insightHandler.GetShared)
 		}
 	}
 

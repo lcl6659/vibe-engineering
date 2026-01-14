@@ -86,3 +86,40 @@ export const youtubeApi = {
 export const contentApi = {
   parseUrl: (url: string) => apiClient.post<any>("/parse", { url }),
 };
+
+/**
+ * Insight API endpoints
+ */
+import type {
+  InsightsListResponse,
+  CreateInsightRequest,
+  CreateInsightResponse,
+} from "./types";
+
+export const insightApi = {
+  /**
+   * Get insights list grouped by time
+   * @param limit - Number of items to return (default: 50)
+   * @param offset - Offset for pagination (default: 0)
+   * @param search - Search keyword (optional)
+   */
+  getInsights: (params?: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+  }) =>
+    apiClient.get<InsightsListResponse>("/v1/insights", {
+      params: {
+        limit: params?.limit || 50,
+        offset: params?.offset || 0,
+        ...(params?.search && { search: params.search }),
+      },
+    }),
+
+  /**
+   * Create a new insight parsing task
+   * @param data - Insight creation data
+   */
+  createInsight: (data: CreateInsightRequest) =>
+    apiClient.post<CreateInsightResponse>("/v1/insights", data),
+};

@@ -57,3 +57,45 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Insight 相关类型定义
+ */
+
+export type InsightSourceType = "youtube" | "twitter" | "podcast";
+export type InsightStatus = "pending" | "processing" | "completed" | "failed";
+
+export interface Insight {
+  id: number;
+  source_type: InsightSourceType;
+  source_url: string;
+  title: string;
+  author: string;
+  thumbnail_url: string;
+  status: InsightStatus;
+  target_lang: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GroupedInsights {
+  today: Insight[];
+  yesterday: Insight[];
+  previous: Insight[];
+}
+
+export interface InsightsListResponse {
+  data: GroupedInsights;
+  total: number;
+}
+
+export interface CreateInsightRequest {
+  source_url: string;
+  target_lang?: string;
+}
+
+export interface CreateInsightResponse {
+  id: number;
+  status: InsightStatus;
+  message: string;
+}
+

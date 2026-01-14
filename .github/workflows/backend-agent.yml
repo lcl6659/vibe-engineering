@@ -47,30 +47,14 @@ jobs:
             // 1. 提取 UI Spec URL（支持 issue 和 comment）
             const urlPattern = /https:\/\/github\.com\/[^\s\)]+\/issues\/\d+(?:#(?:issuecomment-|issue-)\d+)?/g;
             const urls = commentBody.match(urlPattern) || [];
-            
+
             console.log(`找到 ${urls.length} 个 URL`);
-            
+
+            // 如果没有提供 URL，则默认使用当前 Issue 的内容
+            let useCurrentIssue = false;
             if (urls.length === 0) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issue.number,
-                body: [
-                  "❌ **缺少 UI Spec URL**",
-                  "",
-                  "**用法:**",
-                  "```",
-                  "/agent-be <ui-spec-url>",
-                  "```",
-                  "",
-                  "**示例:**",
-                  "```",
-                  "/agent-be https://github.com/owner/repo/issues/123",
-                  "/agent-be https://github.com/owner/repo/issues/123#issuecomment-456789",
-                  "```"
-                ].join("\n")
-              });
-              throw new Error("Missing UI Spec URL");
+              console.log("⚠️ 未提供 URL，将使用当前 Issue 内容作为需求");
+              useCurrentIssue = true;
             }
             
             // 2. 提取用户额外指令
@@ -86,40 +70,51 @@ jobs:
             
             // 3. 获取 UI Spec 内容
             const uiSpecs = [];
-            for (const url of urls) {
-              try {
-                const isIssueUrl = !url.includes("#issuecomment-");
-                let content, title;
-                
-                if (isIssueUrl) {
-                  const issueNum = url.match(/\/issues\/(\d+)/)[1];
-                  const { data } = await github.rest.issues.get({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: parseInt(issueNum)
-                  });
-                  content = data.body || "";
-                  title = data.title;
-                } else {
-                  const commentId = url.split("#issuecomment-")[1];
-                  const { data } = await github.rest.issues.getComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    comment_id: parseInt(commentId)
-                  });
-                  content = data.body;
-                  title = content.split('\n')[0] || 'UI Spec';
+
+            if (useCurrentIssue) {
+              // 使用当前 Issue 的内容作为需求
+              const content = issue.body || "";
+              const title = issue.title;
+              const url = `https://github.com/${context.repo.owner}/${context.repo.repo}/issues/${issue.number}`;
+              uiSpecs.push({ url, content, title });
+              console.log(`✅ 使用当前 Issue: ${title}`);
+            } else {
+              // 从提供的 URL 获取内容
+              for (const url of urls) {
+                try {
+                  const isIssueUrl = !url.includes("#issuecomment-");
+                  let content, title;
+
+                  if (isIssueUrl) {
+                    const issueNum = url.match(/\/issues\/(\d+)/)[1];
+                    const { data } = await github.rest.issues.get({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: parseInt(issueNum)
+                    });
+                    content = data.body || "";
+                    title = data.title;
+                  } else {
+                    const commentId = url.split("#issuecomment-")[1];
+                    const { data } = await github.rest.issues.getComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      comment_id: parseInt(commentId)
+                    });
+                    content = data.body;
+                    title = content.split('\n')[0] || 'UI Spec';
+                  }
+
+                  uiSpecs.push({ url, content, title });
+                  console.log(`✅ 获取 UI Spec: ${title}`);
+                } catch (error) {
+                  console.error(`❌ 获取失败: ${url}`);
+                  throw error;
                 }
-                
-                uiSpecs.push({ url, content, title });
-                console.log(`✅ 获取 UI Spec: ${title}`);
-              } catch (error) {
-                console.error(`❌ 获取失败: ${url}`);
-                throw error;
               }
             }
-            
-            const combinedUISpec = uiSpecs.map((spec, idx) => 
+
+            const combinedUISpec = uiSpecs.map((spec, idx) =>
               `## UI Spec ${idx + 1}: ${spec.title}\n\n${spec.content}`
             ).join("\n\n---\n\n");
             

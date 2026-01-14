@@ -70,40 +70,11 @@ jobs:
               });
               console.log("");
 
+              // 如果没有提供 URL，则默认使用当前 Issue 的内容
+              let useCurrentIssue = false;
               if (urlMatches.length === 0) {
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number,
-                  body: [
-                    "❌ **缺少 UI Spec URL**",
-                    "",
-                    "用法：",
-                    "```",
-                    "/agent-be <ui-spec-url-1> [<ui-spec-url-2> ...]",
-                    "```",
-                    "",
-                    "示例（支持 Issue 或 Comment URL）：",
-                    "```",
-                    "# Issue URL (推荐，直接读取 issue 内容)",
-                    "/agent-be https://github.com/owner/repo/issues/161",
-                    "",
-                    "# Issue URL (带锚点)",
-                    "/agent-be https://github.com/owner/repo/issues/166#issue-3791738749",
-                    "",
-                    "# Comment URL",
-                    "/agent-be https://github.com/owner/repo/issues/139#issuecomment-123456",
-                    "",
-                    "# 支持多个 URL：",
-                    "/agent-be \\",
-                    "  https://github.com/owner/repo/issues/161 \\",
-                    "  https://github.com/owner/repo/issues/139#issuecomment-123456",
-                    "```",
-                    "",
-                    "Backend Agent 必须基于冻结的 UI Spec 执行。"
-                  ].join("\n")
-                });
-                return;
+                console.log("⚠️ 未提供 URL，将使用当前 Issue 内容作为需求");
+                useCurrentIssue = true;
               }
 
               // 1.1 Extract user instructions (text after URLs)
@@ -125,7 +96,20 @@ jobs:
               // 2. Fetch all UI Specs from multiple URLs (支持 issue 和 comment)
               const uiSpecs = [];
               const specUrls = [];
-              
+
+              if (useCurrentIssue) {
+                // 使用当前 Issue 的内容作为需求
+                const issueData = context.payload.issue;
+                const content = issueData.body || "";
+                const title = issueData.title;
+                const url = `https://github.com/${owner}/${repo}/issues/${issue_number}`;
+                uiSpecs.push({ url, content, title });
+                specUrls.push(url);
+                console.log(`✅ 使用当前 Issue: ${title}`);
+                console.log(`   内容长度: ${content.length} 字符`);
+                console.log(`   内容预览: ${content.substring(0, 200)}${content.length > 200 ? '...' : ''}`);
+              }
+
               for (const specUrl of urlMatches) {
                 try {
                   // 判断 URL 类型：issue 还是 comment

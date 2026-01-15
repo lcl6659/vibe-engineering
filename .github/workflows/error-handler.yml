@@ -2,98 +2,246 @@ name: Error Handler
 
 on:
   workflow_run:
-    workflows: 
+    workflows:
       - "Backend Agent"
       - "Vibe Frontend Agent"
       - "Vibe UI Agent"
     types:
       - completed
 
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+  issues: write
+
 jobs:
   handle-errors:
     if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      actions: read
-    
+
     steps:
-      - name: Report Failure to Issue
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Collect Error Info
+        id: error_info
         uses: actions/github-script@v7
         with:
           script: |
             const run = context.payload.workflow_run;
-            
-            // 查找关联的 Issue（从 PR 或 branch 名称）
+
+            // 查找关联的 Issue
             let issueNumber = null;
-            
-            // 尝试从 branch 名称提取 issue number
             const branchMatch = run.head_branch?.match(/issue-(\d+)/);
             if (branchMatch) {
               issueNumber = parseInt(branchMatch[1]);
             }
-            
-            // 如果有关联的 PR，从 PR 获取
             if (!issueNumber && run.pull_requests.length > 0) {
               issueNumber = run.pull_requests[0].number;
             }
-            
-            // 获取失败的 jobs
+
+            // 获取失败的 jobs 和日志
             const jobs = await github.rest.actions.listJobsForWorkflowRun({
               owner: context.repo.owner,
               repo: context.repo.repo,
               run_id: run.id
             });
-            
+
             const failedJobs = jobs.data.jobs.filter(job => job.conclusion === 'failure');
-            
-            const errorReport = [
+
+            // 获取每个失败 job 的日志（截取最后部分）
+            let errorLogs = [];
+            for (const job of failedJobs.slice(0, 2)) { // 最多2个 job
+              try {
+                const logs = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  job_id: job.id
+                });
+                // 只保留最后 200 行
+                const logLines = logs.data.split('\n').slice(-200).join('\n');
+                errorLogs.push({
+                  jobName: job.name,
+                  logs: logLines
+                });
+              } catch (e) {
+                errorLogs.push({ jobName: job.name, logs: 'Failed to fetch logs' });
+              }
+            }
+
+            // 保存结果
+            const result = {
+              issueNumber,
+              runId: run.id,
+              runUrl: run.html_url,
+              workflowName: run.name,
+              headBranch: run.head_branch,
+              event: run.event,
+              failedJobs: failedJobs.map(j => j.name),
+              errorLogs
+            };
+
+            core.setOutput('result', JSON.stringify(result));
+            core.setOutput('issue_number', issueNumber || '');
+            return result;
+
+      - name: Analyze Error with Claude
+        id: analyze
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          direct_prompt: |
+            你是一个 CI/CD 错误分析专家。请分析以下 GitHub Actions workflow 失败的原因，并提供简洁的分析报告。
+
+            ## Workflow 信息
+            - Workflow: ${{ fromJSON(steps.error_info.outputs.result).workflowName }}
+            - Branch: ${{ fromJSON(steps.error_info.outputs.result).headBranch }}
+            - 失败的 Jobs: ${{ join(fromJSON(steps.error_info.outputs.result).failedJobs, ', ') }}
+
+            ## 错误日志
+            ```
+            ${{ toJSON(fromJSON(steps.error_info.outputs.result).errorLogs) }}
+            ```
+
+            请输出以下格式的分析报告（使用中文）：
+
+            ## 🔍 错误分析
+
+            ### 根本原因
+            [一句话描述根本原因]
+
+            ### 错误类型
+            [选择一个: 配置问题 | 代码错误 | 输入缺失 | 权限问题 | 临时故障 | 其他]
+
+            ### 详细说明
+            [2-3句话详细解释问题]
+
+            ### 建议修复方案
+            [列出1-3个具体的修复步骤]
+
+            ### 是否可自动修复
+            [是/否] - [原因]
+          allowed_tools: ""
+        env:
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+
+      - name: Post Analysis to Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const errorInfo = ${{ steps.error_info.outputs.result }};
+            const analysis = `${{ steps.analyze.outputs.response }}`;
+
+            const reportBody = [
               "## ❌ Workflow 执行失败",
               "",
-              `**Workflow:** ${run.name}`,
-              `**运行 ID:** ${run.id}`,
-              `**触发分支:** ${run.head_branch}`,
-              `**触发事件:** ${run.event}`,
+              `**Workflow:** ${errorInfo.workflowName}`,
+              `**运行 ID:** ${errorInfo.runId}`,
+              `**触发分支:** ${errorInfo.headBranch}`,
+              `**触发事件:** ${errorInfo.event}`,
               "",
               "### 失败的 Jobs:",
-              ...failedJobs.map(job => `- **${job.name}** (${job.conclusion})`),
+              ...errorInfo.failedJobs.map(job => `- **${job}**`),
               "",
-              `🔗 [查看完整日志](${run.html_url})`,
+              `🔗 [查看完整日志](${errorInfo.runUrl})`,
               "",
               "---",
-              "_自动生成的错误报告 - Error Handler_"
+              "",
+              analysis || "_AI 分析暂不可用_",
+              "",
+              "---",
+              "_自动生成 - Error Handler with AI Analysis_"
             ].join("\n");
-            
-            if (issueNumber) {
+
+            if (errorInfo.issueNumber) {
               // 评论到关联的 Issue
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issueNumber,
-                body: errorReport
+                issue_number: errorInfo.issueNumber,
+                body: reportBody
               });
-              
-              // 移除 processing 标签，添加 failed 标签
+
+              // 更新标签
               await github.rest.issues.removeLabel({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issueNumber,
+                issue_number: errorInfo.issueNumber,
                 name: '🤖 ai-processing'
               }).catch(() => {});
-              
+
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issueNumber,
-                labels: ['❌ ai-failed']
+                issue_number: errorInfo.issueNumber,
+                labels: ['❌ ai-failed', '🔍 analyzed']
               });
+
+              core.setOutput('target_issue', errorInfo.issueNumber);
             } else {
-              // 创建新 Issue 报告错误
-              await github.rest.issues.create({
+              // 创建新 Issue
+              const newIssue = await github.rest.issues.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                title: `[Auto] Workflow 失败: ${run.name}`,
-                body: errorReport,
-                labels: ['🐛 bug', '🤖 auto-generated', 'workflow-failure']
+                title: `[Auto] Workflow 失败: ${errorInfo.workflowName}`,
+                body: reportBody,
+                labels: ['🐛 bug', '🤖 auto-generated', 'workflow-failure', '🔍 analyzed']
+              });
+
+              core.setOutput('target_issue', newIssue.data.number);
+            }
+
+      - name: Check if Auto-Fix is Possible
+        id: check_fix
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const analysis = `${{ steps.analyze.outputs.response }}`;
+
+            // 简单判断是否可以自动修复
+            const canAutoFix = analysis.includes('是否可自动修复') &&
+                               analysis.includes('是') &&
+                               !analysis.includes('输入缺失') &&
+                               !analysis.includes('配置问题');
+
+            // 检查是否是代码错误
+            const isCodeError = analysis.includes('代码错误');
+
+            core.setOutput('can_auto_fix', canAutoFix && isCodeError);
+            return { canAutoFix, isCodeError };
+
+      - name: Trigger Auto-Fix (if applicable)
+        if: steps.check_fix.outputs.can_auto_fix == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const errorInfo = ${{ steps.error_info.outputs.result }};
+
+            // 触发 fix-pr workflow
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'fix-pr.yml',
+              ref: 'main',
+              inputs: {
+                pr_number: String(errorInfo.issueNumber || ''),
+                error_context: `Workflow ${errorInfo.workflowName} failed. Check issue for AI analysis.`
+              }
+            }).catch(e => {
+              console.log('Could not trigger auto-fix:', e.message);
+            });
+
+            // 评论通知
+            if (errorInfo.issueNumber) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: errorInfo.issueNumber,
+                body: '🔧 **正在尝试自动修复...** 请稍候查看结果。'
               });
             }

@@ -60,7 +60,7 @@ type Insight struct {
 	ErrorMessage string        `json:"error_message,omitempty" gorm:"type:text"`
 
 	// Sharing
-	ShareToken    string     `json:"share_token,omitempty" gorm:"type:varchar(64);uniqueIndex"`
+	ShareToken    *string    `json:"share_token,omitempty" gorm:"type:varchar(64);uniqueIndex"`
 	SharePassword string     `json:"-" gorm:"type:varchar(255)"`             // bcrypt hash, never exposed in JSON
 	ShareConfig   datatypes.JSON `json:"share_config,omitempty" gorm:"type:jsonb"` // What to include in share
 	IsPublic      bool       `json:"is_public" gorm:"default:false"`

@@ -123,6 +123,29 @@ export interface Highlight {
 }
 
 /**
+ * Create highlight request
+ */
+export interface CreateHighlightRequest {
+  text: string;
+  start_offset: number;
+  end_offset: number;
+  color: string;
+  note?: string;
+}
+
+/**
+ * Highlight color options
+ */
+export type HighlightColor = "yellow" | "green" | "blue" | "purple" | "red";
+
+/**
+ * Highlights list response
+ */
+export interface HighlightsListResponse {
+  highlights: Highlight[];
+}
+
+/**
  * Insight detail response from GET /api/v1/insights/:id
  */
 export interface InsightDetailResponse {

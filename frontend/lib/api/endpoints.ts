@@ -139,4 +139,37 @@ export const insightApi = {
     apiClient.post<{ status: string; message: string }>(
       `/v1/insights/${id}/process`
     ),
+
+  /**
+   * Get all highlights for an insight
+   * @param insightId - Insight ID
+   */
+  getHighlights: (insightId: number) =>
+    apiClient.get<import("./types").HighlightsListResponse>(
+      `/v1/insights/${insightId}/highlights`
+    ),
+
+  /**
+   * Create a new highlight
+   * @param insightId - Insight ID
+   * @param data - Highlight creation data
+   */
+  createHighlight: (
+    insightId: number,
+    data: import("./types").CreateHighlightRequest
+  ) =>
+    apiClient.post<import("./types").Highlight>(
+      `/v1/insights/${insightId}/highlights`,
+      data
+    ),
+
+  /**
+   * Delete a highlight
+   * @param insightId - Insight ID
+   * @param highlightId - Highlight ID
+   */
+  deleteHighlight: (insightId: number, highlightId: number) =>
+    apiClient.delete<{ message: string }>(
+      `/v1/insights/${insightId}/highlights/${highlightId}`
+    ),
 };

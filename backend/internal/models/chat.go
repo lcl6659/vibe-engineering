@@ -1,27 +1,6 @@
 package models
 
-import (
-	"time"
-
-	"gorm.io/gorm"
-)
-
-// ChatMessage represents a single chat message in a conversation.
-type ChatMessage struct {
-	ID          uint           `json:"id" gorm:"primaryKey"`
-	AnalysisID  uint           `json:"analysis_id" gorm:"index;not null"`
-	Role        string         `json:"role" gorm:"type:varchar(20);not null"` // "user" or "assistant"
-	Content     string         `json:"content" gorm:"type:text;not null"`
-	HighlightID *uint          `json:"highlight_id,omitempty" gorm:"index"` // optional: linked to a highlight
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
-}
-
-// TableName returns the table name for ChatMessage model.
-func (ChatMessage) TableName() string {
-	return "chat_messages"
-}
+import "time"
 
 // Entity represents a detected entity in the content.
 type Entity struct {
@@ -38,12 +17,6 @@ type Suggestion struct {
 }
 
 // Request/Response DTOs
-
-// ChatRequest represents a chat message request.
-type ChatRequest struct {
-	Message     string `json:"message" binding:"required"`
-	HighlightID *uint  `json:"highlight_id,omitempty"`
-}
 
 // ChatMessageResponse represents a single message in the response.
 type ChatMessageResponse struct {

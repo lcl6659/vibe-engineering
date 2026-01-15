@@ -66,7 +66,8 @@ func (s *ChatService) ChatStream(ctx context.Context, analysisID uint, message s
 
 	// Save user message
 	userMessage := &models.ChatMessage{
-		AnalysisID:  analysisID,
+		InsightID:   analysisID,
+		UserID:      0, // TODO: Get from context/auth
 		Role:        "user",
 		Content:     message,
 		HighlightID: highlightID,
@@ -305,9 +306,10 @@ func (s *ChatService) streamFromOpenRouter(ctx context.Context, messages []map[s
 	// Save assistant message
 	if fullContent.Len() > 0 {
 		assistantMessage := &models.ChatMessage{
-			AnalysisID: analysisID,
-			Role:       "assistant",
-			Content:    fullContent.String(),
+			InsightID: analysisID,
+			UserID:    0, // TODO: Get from context/auth
+			Role:      "assistant",
+			Content:   fullContent.String(),
 		}
 		if err := s.chatRepo.CreateMessage(ctx, assistantMessage); err != nil {
 			s.log.Error("Failed to save assistant message", zap.Error(err))

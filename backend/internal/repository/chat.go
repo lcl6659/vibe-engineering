@@ -23,10 +23,11 @@ func (r *ChatRepository) CreateMessage(ctx context.Context, message *models.Chat
 }
 
 // GetMessagesByAnalysisID returns all chat messages for an analysis.
+// Note: This method now uses InsightID instead of AnalysisID for compatibility with the InsightFlow system.
 func (r *ChatRepository) GetMessagesByAnalysisID(ctx context.Context, analysisID uint) ([]models.ChatMessage, error) {
 	var messages []models.ChatMessage
 	err := r.db.WithContext(ctx).
-		Where("analysis_id = ?", analysisID).
+		Where("insight_id = ?", analysisID).
 		Order("created_at ASC").
 		Find(&messages).Error
 	return messages, err
@@ -43,8 +44,9 @@ func (r *ChatRepository) GetMessageByID(ctx context.Context, id uint) (*models.C
 }
 
 // DeleteMessagesByAnalysisID deletes all chat messages for an analysis.
+// Note: This method now uses InsightID instead of AnalysisID for compatibility with the InsightFlow system.
 func (r *ChatRepository) DeleteMessagesByAnalysisID(ctx context.Context, analysisID uint) error {
 	return r.db.WithContext(ctx).
-		Where("analysis_id = ?", analysisID).
+		Where("insight_id = ?", analysisID).
 		Delete(&models.ChatMessage{}).Error
 }

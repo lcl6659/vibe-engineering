@@ -1,0 +1,157 @@
+name: Update PRD Status
+
+on:
+  # 当 issue 关闭时触发
+  issues:
+    types: [closed, reopened]
+  # 支持手动触发
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: '强制更新所有子 issue 状态'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  update-prd:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Update PRD issue #176
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const PRD_ISSUE = 176;
+
+            // InsightFlow 子 issue 配置
+            const SUB_ISSUES = [
+              { number: 177, priority: 'P0', name: '笔记系统数据模型', hasFrontend: false, hasBackend: true },
+              { number: 178, priority: 'P0', name: '时间轴导航栏 (Memory Rail)', hasFrontend: true, hasBackend: true },
+              { number: 179, priority: 'P1', name: '内容解析页面 (Insight Canvas)', hasFrontend: true, hasBackend: true },
+              { number: 180, priority: 'P2', name: '滑词交互功能', hasFrontend: true, hasBackend: false },
+              { number: 181, priority: 'P3', name: 'AI 对话面板 (Chat Console)', hasFrontend: true, hasBackend: true },
+              { number: 182, priority: 'P4', name: '笔记分享功能', hasFrontend: true, hasBackend: true },
+            ];
+
+            // 获取所有子 issue 的状态
+            const issueStatuses = await Promise.all(
+              SUB_ISSUES.map(async (sub) => {
+                try {
+                  const { data: issue } = await github.rest.issues.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: sub.number,
+                  });
+
+                  const labels = issue.labels.map(l => typeof l === 'string' ? l : l.name);
+                  const isClosed = issue.state === 'closed';
+                  const hasAiCompleted = labels.includes('✅ ai-completed');
+                  const hasDeployed = labels.includes('✅ deployed');
+
+                  return {
+                    ...sub,
+                    state: issue.state,
+                    labels,
+                    isClosed,
+                    hasAiCompleted,
+                    hasDeployed,
+                  };
+                } catch (error) {
+                  console.log(`无法获取 issue #${sub.number}: ${error.message}`);
+                  return { ...sub, state: 'unknown', labels: [] };
+                }
+              })
+            );
+
+            // 生成状态 emoji
+            function getStatusEmoji(issue) {
+              if (issue.isClosed || issue.hasDeployed) return '✅ 已完成';
+              if (issue.hasAiCompleted) return '🔶 待部署';
+              return '🔶 开发中';
+            }
+
+            function getFrontendEmoji(issue) {
+              if (!issue.hasFrontend) return '❌';
+              if (issue.isClosed || issue.hasDeployed) return '✅';
+              if (issue.labels.includes('agent:frontend') || issue.hasAiCompleted) return '✅';
+              return '⚠️';
+            }
+
+            function getBackendEmoji(issue) {
+              if (!issue.hasBackend) return '❌';
+              if (issue.isClosed || issue.hasDeployed) return '✅';
+              return '✅';
+            }
+
+            // 获取当前 PRD issue 内容
+            const { data: prdIssue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: PRD_ISSUE,
+            });
+
+            let body = prdIssue.body;
+
+            // 构建新的状态表格
+            const tableRows = issueStatuses.map(issue => {
+              const fe = getFrontendEmoji(issue);
+              const be = getBackendEmoji(issue);
+              const status = getStatusEmoji(issue);
+              return `| **${issue.priority}** | #${issue.number} | ${issue.name} | ${fe} | ${be} | ${status} |`;
+            }).join('\n');
+
+            const newTable = `| Priority | Issue | 功能模块 | 前端 | 后端 | 状态 |
+            |----------|-------|---------|------|------|------|
+            ${tableRows}`;
+
+            // 替换表格 (使用简单的字符串替换)
+            const tableStart = '| Priority | Issue | 功能模块 | 前端 | 后端 | 状态 |';
+            const tableStartIndex = body.indexOf(tableStart);
+            if (tableStartIndex !== -1) {
+              // 找到表格结束位置 (下一个 --- 或 ##)
+              const afterTableStart = body.substring(tableStartIndex);
+              const nextSectionMatch = afterTableStart.match(/\n\n---|\n\n##/);
+              if (nextSectionMatch) {
+                const tableEndIndex = tableStartIndex + nextSectionMatch.index;
+                body = body.substring(0, tableStartIndex) + newTable.split('\n').map(l => l.trim()).join('\n') + body.substring(tableEndIndex);
+              }
+            }
+
+            // 更新子 issue 列表
+            const checklistItems = issueStatuses.map(issue => {
+              const checked = issue.isClosed || issue.hasDeployed ? '[x]' : '[ ]';
+              const status = issue.isClosed ? '✅ 已完成' : (issue.hasAiCompleted ? '🔶 待部署' : '🔶 开发中');
+              const issueType = issue.hasFrontend && issue.hasBackend ? '[BE+FE]' : (issue.hasFrontend ? '[FE]' : '[BE]');
+              return `- ${checked} #${issue.number} **${issue.priority}**: ${issueType} ${issue.name} - ${status}`;
+            }).join('\n');
+
+            const checklistHeader = '## 📎 子 Issue 列表';
+            const checklistIndex = body.indexOf(checklistHeader);
+            if (checklistIndex !== -1) {
+              const afterChecklist = body.substring(checklistIndex);
+              const nextSectionMatch = afterChecklist.match(/\n\n---/);
+              if (nextSectionMatch) {
+                const checklistEndIndex = checklistIndex + nextSectionMatch.index;
+                body = body.substring(0, checklistIndex) + checklistHeader + '\n\n' + checklistItems + body.substring(checklistEndIndex);
+              }
+            }
+
+            // 更新 PRD issue
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: PRD_ISSUE,
+              body: body,
+            });
+
+            console.log('✅ PRD issue #176 状态已更新');
+
+            // 输出更新摘要
+            const summary = issueStatuses.map(i => `#${i.number}: ${i.state}`).join(', ');
+            core.summary.addHeading('PRD Status Update');
+            core.summary.addRaw(`Updated PRD #${PRD_ISSUE} with latest sub-issue statuses: ${summary}`);
+            await core.summary.write();

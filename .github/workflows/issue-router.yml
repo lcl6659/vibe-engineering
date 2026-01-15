@@ -125,15 +125,18 @@ jobs:
                 ].join('\n')
               });
 
-              // 在新 Issue 添加开始处理评论
+              // 在新 Issue 添加触发评论（包含原始命令以触发对应的 agent workflow）
+              // 将 /agent-new-xxx 转换为 /agent-xxx 以触发实际的 agent
+              const agentCommand = matched.trigger.replace('-new-', '-');
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: newIssue.number,
-                body: `🤖 **AI Agent 已启动**\n\n` +
-                      `命令: \`${matched.trigger}${commandArgs ? ' ' + commandArgs : ''}\`\n` +
-                      `状态: 处理中...\n\n` +
-                      `请在 [Actions](/${context.repo.owner}/${context.repo.repo}/actions) 标签页查看实时进度。`
+                body: `${agentCommand}${commandArgs ? ' ' + commandArgs : ''}\n\n` +
+                      `---\n\n` +
+                      `🤖 **AI Agent 触发中...**\n\n` +
+                      `> 此评论由 Issue Router 自动创建，用于触发对应的 Agent Workflow。\n` +
+                      `> 请在 [Actions](/${context.repo.owner}/${context.repo.repo}/actions) 标签页查看实时进度。`
               });
 
             } else {

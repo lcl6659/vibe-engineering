@@ -426,6 +426,32 @@ jobs:
 
             // 不再创建额外评论，所有信息都在进度追踪评论中
 
+      - name: Trigger Verification
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
+
+            console.log(`🔍 触发验收检查: Issue #${issueNumber}`);
+
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'vibe-continuous.yml',
+                ref: 'main',
+                inputs: {
+                  issue_number: String(issueNumber),
+                  mode: 'verify'
+                }
+              });
+              console.log(`✅ 已触发 vibe-continuous 验收检查`);
+            } catch (error) {
+              console.log(`⚠️ 触发验收检查失败: ${error.message}`);
+              // 即使触发失败也不影响整体流程
+            }
+
       - name: Update Issue on Failure
         if: failure()
         uses: actions/github-script@v7

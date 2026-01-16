@@ -20,6 +20,7 @@ on:
           - scan        # 扫描所有进行中的 issue
           - check       # 检测指定 issue 完成度
           - continue    # 继续处理未完成任务
+          - verify      # 验收模式：检测完成度，通过则关闭 issue
 
 jobs:
   continuous-iteration:
@@ -461,10 +462,105 @@ jobs:
                   labels: ['✅ verified']
                 });
 
-              } else if (evaluation.should_continue && mode !== 'check') {
-                // 触发继续迭代
+                // 验收模式下：更新验收标准 checkbox 并关闭 issue
+                if (mode === 'verify') {
+                  console.log(`  📝 验收模式：更新验收标准并关闭 issue`);
+
+                  // 更新 issue body 中的 checkbox 为已完成
+                  let updatedBody = issue.body || '';
+                  for (const item of evaluation.completed_items) {
+                    // 尝试匹配并更新 checkbox
+                    const escapedItem = item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const uncheckedPattern = new RegExp(`- \\[ \\]\\s*${escapedItem}`, 'gi');
+                    updatedBody = updatedBody.replace(uncheckedPattern, `- [x] ${item}`);
+                  }
+
+                  await github.rest.issues.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    body: updatedBody
+                  });
+
+                  // 移除进行中的标签
+                  const labelsToRemove = ['🤖 ai-processing', '❌ ai-failed', 'needs-review', 'agent:medium', 'agent:simple', 'agent:complex'];
+                  for (const label of labelsToRemove) {
+                    try {
+                      await github.rest.issues.removeLabel({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: issue.number,
+                        name: label
+                      });
+                    } catch (e) {}
+                  }
+
+                  // 发布验收通过评论（不自动关闭，等待用户最终确认）
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    body: [
+                      "## ✅ 验收通过",
+                      "",
+                      `**完成度**: ${evaluation.completion_percentage}%`,
+                      "",
+                      "**已完成项目**:",
+                      evaluation.completed_items.map(i => `- [x] ${i}`).join('\n'),
+                      "",
+                      "所有验收标准已满足，请确认后关闭此 Issue。",
+                      "",
+                      "---",
+                      "> 🔍 由 Vibe Continuous 自动验收"
+                    ].join("\n")
+                  });
+
+                  // 添加等待确认标签
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    labels: ['📋 pending-confirmation']
+                  });
+
+                  console.log(`  🎉 Issue #${issue.number} 验收通过，等待用户最终确认`);
+                }
+
+              } else if (evaluation.should_continue && (mode === 'scan' || mode === 'continue')) {
+                // 触发继续迭代（仅在 scan 或 continue 模式下）
                 const triggered = await triggerContinuation(issue, evaluation);
                 if (triggered) results.continued++;
+              } else if (mode === 'verify') {
+                // 验收模式下未通过：添加评论说明
+                console.log(`  ❌ 验收未通过，完成度: ${evaluation.completion_percentage}%`);
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: [
+                    "## ⚠️ 验收未通过",
+                    "",
+                    `**完成度**: ${evaluation.completion_percentage}%`,
+                    "",
+                    "**未完成项目**:",
+                    evaluation.pending_items.map(i => `- [ ] ${i}`).join('\n'),
+                    "",
+                    "**建议下一步**:",
+                    evaluation.next_action,
+                    "",
+                    "---",
+                    "> 🔍 由 Vibe Continuous 自动验收"
+                  ].join("\n")
+                });
+
+                // 添加需要继续的标签
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  labels: ['needs-review']
+                });
               } else {
                 console.log(`  ℹ️ 完成度: ${evaluation.completion_percentage}% (模式: ${mode})`);
               }

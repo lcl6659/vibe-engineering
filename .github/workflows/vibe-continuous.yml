@@ -338,7 +338,9 @@ jobs:
                 return false;
               }
 
-              // 构建继续处理的指令
+              // 构建继续处理的上下文
+              const continuationContext = `迭代#${currentIteration + 1}: 完成度${evaluation.completion_percentage}%, 待完成: ${evaluation.pending_items.slice(0, 3).join('; ')}`;
+
               const continuationPrompt = [
                 `## 🔄 自动迭代 #${currentIteration + 1}`,
                 "",
@@ -354,11 +356,7 @@ jobs:
                 evaluation.next_action,
                 "",
                 "---",
-                "",
-                `/${evaluation.agent_type === 'simple' ? 'agent-simple' : evaluation.agent_type === 'complex' ? 'agent-complex' : 'agent-medium'}`,
-                "",
-                "---",
-                "> 🔄 由 Vibe Continuous 自动触发"
+                "> 🔄 由 Vibe Continuous 自动触发 workflow_dispatch"
               ].join("\n");
 
               // 更新 issue body 中的迭代计数
@@ -373,7 +371,7 @@ jobs:
                 body: newBody
               });
 
-              // 发布继续处理的评论
+              // 发布状态评论
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -381,7 +379,27 @@ jobs:
                 body: continuationPrompt
               });
 
-              console.log(`✅ 已触发 Issue #${issue.number} 继续迭代 (第 ${currentIteration + 1} 次)`);
+              // 直接触发 agent workflow（使用 workflow_dispatch）
+              const agentWorkflow = evaluation.agent_type === 'simple' ? 'agent-simple.yml' :
+                                    evaluation.agent_type === 'complex' ? 'agent-complex.yml' : 'agent-medium.yml';
+
+              try {
+                await github.rest.actions.createWorkflowDispatch({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: agentWorkflow,
+                  ref: 'main',
+                  inputs: {
+                    issue_number: String(issue.number),
+                    continuation_context: continuationContext
+                  }
+                });
+                console.log(`✅ 已通过 workflow_dispatch 触发 ${agentWorkflow} 处理 Issue #${issue.number} (第 ${currentIteration + 1} 次迭代)`);
+              } catch (dispatchError) {
+                console.error(`❌ 触发 ${agentWorkflow} 失败: ${dispatchError.message}`);
+                return false;
+              }
+
               return true;
             }
 

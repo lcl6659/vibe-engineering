@@ -185,7 +185,7 @@ jobs:
         with:
           script: |
             const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
-            const progressCommentId = ${{ steps.update_issue_status.outputs.progress_comment_id }};
+            const progressCommentId = '${{ steps.update_issue_status.outputs.progress_comment_id }}' || null;
             
             if (progressCommentId) {
               await github.rest.issues.updateComment({
@@ -234,7 +234,7 @@ jobs:
         with:
           script: |
             const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
-            const progressCommentId = ${{ steps.update_issue_status.outputs.progress_comment_id }};
+            const progressCommentId = '${{ steps.update_issue_status.outputs.progress_comment_id }}' || null;
             
             if (progressCommentId) {
               await github.rest.issues.updateComment({
@@ -335,7 +335,7 @@ jobs:
         with:
           script: |
             const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
-            const progressCommentId = ${{ steps.update_issue_status.outputs.progress_comment_id }};
+            const progressCommentId = '${{ steps.update_issue_status.outputs.progress_comment_id }}' || null;
             const branchName = '${{ steps.check_result.outputs.branch_name }}' || '';
 
             // 获取最近创建的 PR（由本次执行创建）
@@ -711,7 +711,7 @@ jobs:
         with:
           script: |
             const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
-            const progressCommentId = ${{ steps.update_issue_status.outputs.progress_comment_id }};
+            const progressCommentId = '${{ steps.update_issue_status.outputs.progress_comment_id }}' || null;
             const errorMessage = `${{ steps.check_result.outputs.error_message || '未知错误' }}`;
 
             // 分析错误类型

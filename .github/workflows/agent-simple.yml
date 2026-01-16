@@ -28,6 +28,7 @@ jobs:
       issues: write
       contents: write
       pull-requests: write
+      checks: read
 
     steps:
       - name: Checkout
@@ -273,13 +274,11 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           github_token: ${{ github.token }}
-          # track_progress only supported for issue_comment events, not workflow_call
-          track_progress: ${{ github.event_name == 'issue_comment' }}
+          track_progress: true
           prompt: ${{ steps.prompt.outputs.prompt }}
           claude_args: |
             --model anthropic/claude-sonnet-4
             --max-turns 30
-            --allowedTools "Bash,Read,Write,Edit,Glob,Grep,WebFetch"
 
       - name: Check and Handle Claude Result
         if: steps.check_duplicate.outputs.is_duplicate != 'true'
@@ -287,9 +286,14 @@ jobs:
         run: |
           OUTCOME="${{ steps.claude.outcome }}"
           CONCLUSION="${{ steps.claude.conclusion }}"
+          BRANCH_NAME="${{ steps.claude.outputs.branch_name }}"
 
           echo "Claude outcome: $OUTCOME"
           echo "Claude conclusion: $CONCLUSION"
+          echo "Branch name: $BRANCH_NAME"
+
+          # 保存分支名供后续使用
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
           if [ "$OUTCOME" == "failure" ] || [ "$OUTCOME" == "cancelled" ]; then
             echo "claude_failed=true" >> $GITHUB_OUTPUT
@@ -332,6 +336,7 @@ jobs:
           script: |
             const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
             const progressCommentId = ${{ steps.update_issue_status.outputs.progress_comment_id }};
+            const branchName = '${{ steps.check_result.outputs.branch_name }}' || '';
 
             // 获取最近创建的 PR（由本次执行创建）
             let prInfo = '';
@@ -351,6 +356,7 @@ jobs:
                 pr.title.toLowerCase().includes(`issue-${issueNumber}`) ||
                 pr.head.ref.includes(`issue-${issueNumber}`) ||
                 pr.head.ref.includes(`${issueNumber}`) ||
+                (branchName && pr.head.ref === branchName) ||
                 pr.body?.includes(`#${issueNumber}`) ||
                 pr.body?.includes(`Closes #${issueNumber}`) ||
                 pr.body?.includes(`Fixes #${issueNumber}`)
@@ -436,6 +442,179 @@ jobs:
               });
 
               // 不关闭 Issue，直接返回
+              return;
+            }
+
+            // 检查 PR 的 CI 状态
+            let checkRuns = [];
+            try {
+              const { data: checkData } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: relatedPR.head.sha,
+                per_page: 50
+              });
+              checkRuns = checkData.check_runs || [];
+            } catch (e) {
+              console.log(`⚠️ 获取 Check Runs 失败: ${e.message}`);
+            }
+
+            const failedChecks = checkRuns.filter(run =>
+              ['failure', 'cancelled', 'timed_out', 'action_required'].includes(run.conclusion)
+            );
+            const pendingChecks = checkRuns.filter(run => run.status !== 'completed');
+
+            const summarizeChecks = (runs) =>
+              runs.map(r => `- ${r.name}: ${r.conclusion || r.status}`).join('\n');
+
+            if (failedChecks.length > 0) {
+              console.log(`❌ 检测到 ${failedChecks.length} 个失败的检查`);
+
+              const ciFailureSection = [
+                "## ❌ Simple Agent - CI 失败",
+                "",
+                "**当前阶段**: ❌ CI 检查未通过",
+                "",
+                "```",
+                "██████████████░░░░░░ 70%",
+                "```",
+                "",
+                "**失败检查**:",
+                summarizeChecks(failedChecks),
+                "",
+                `**Actions 日志**: [查看详情](/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})`,
+                "",
+                "已自动触发修复流程（如适用）。"
+              ].join("\n");
+
+              if (progressCommentId) {
+                try {
+                  await github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: progressCommentId,
+                    body: [
+                      "⚡ **Simple Agent**",
+                      "",
+                      "---",
+                      "",
+                      ciFailureSection
+                    ].join("\n")
+                  });
+                } catch (e) {
+                  console.log("无法更新进度评论:", e.message);
+                }
+              }
+
+              const shouldTriggerFix = failedChecks.some(run => {
+                const name = (run.name || '').toLowerCase();
+                return name.includes('build') || name.includes('test') || name.includes('lint') || name.includes('type');
+              });
+
+              if (shouldTriggerFix) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: relatedPR.number,
+                  body: [
+                    "/fix",
+                    "",
+                    "---",
+                    "🔄 **自动修复**：检测到 CI 失败，已触发修复流程。"
+                  ].join("\n")
+                });
+              }
+
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: '🤖 ai-processing'
+                });
+              } catch (e) {}
+
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: 'agent:simple'
+                });
+              } catch (e) {}
+
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['⚠️ ci-failed', 'needs-review']
+              });
+
+              return;
+            }
+
+            if (pendingChecks.length > 0) {
+              console.log(`⏳ 仍有 ${pendingChecks.length} 个检查未完成`);
+
+              const ciPendingSection = [
+                "## ⏳ Simple Agent - CI 进行中",
+                "",
+                "**当前阶段**: ⏳ 等待 CI 完成",
+                "",
+                "```",
+                "██████████████░░░░░░ 70%",
+                "```",
+                "",
+                "**未完成检查**:",
+                summarizeChecks(pendingChecks),
+                "",
+                `**Actions 日志**: [查看详情](/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})`
+              ].join("\n");
+
+              if (progressCommentId) {
+                try {
+                  await github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: progressCommentId,
+                    body: [
+                      "⚡ **Simple Agent**",
+                      "",
+                      "---",
+                      "",
+                      ciPendingSection
+                    ].join("\n")
+                  });
+                } catch (e) {
+                  console.log("无法更新进度评论:", e.message);
+                }
+              }
+
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: '🤖 ai-processing'
+                });
+              } catch (e) {}
+
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: 'agent:simple'
+                });
+              } catch (e) {}
+
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['⚠️ ci-pending', 'needs-review']
+              });
+
               return;
             }
 

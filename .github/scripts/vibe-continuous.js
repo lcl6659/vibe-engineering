@@ -363,7 +363,8 @@ module.exports = async ({ github, context, core, mode, specificIssue }) => {
         workflow_id: agentWorkflow,
         ref: 'main',
         inputs: {
-          issue_number: String(issue.number)
+          issue_number: String(issue.number),
+          continuation_context: `继续完成剩余 ${evaluation.pending_items.length} 项任务`
         }
       });
       console.log(`✅ 已触发 ${agentWorkflow} 处理 Issue #${issue.number}`);

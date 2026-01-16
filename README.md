@@ -31,7 +31,7 @@
 - **Issue 管理**: 自动标签、欢迎消息、父子 Issue 关系管理
 - **错误分析**: AI 分析 workflow 失败原因，提供修复建议
 - **状态同步**: 自动同步 Issue 状态和实现进度
-- **每周维护**: 自动检查依赖、安全漏洞和待处理任务
+- **每日维护**: 每天凌晨 3:00 自动检查依赖、安全漏洞和待处理任务
 
 ---
 
@@ -156,7 +156,7 @@ npm run dev
 | ---------------------- | --------------- | ----------------- |
 | **Auto Vision**        | AI 产品经理分析 | `💡 insight` 标签 |
 | **Smoke Test**         | 功能验证测试    | `/deploy` 命令    |
-| **Weekly Maintenance** | 每周仓库维护    | 每周一自动运行    |
+| **Weekly Maintenance** | 每日仓库维护    | 每天凌晨 3:00（北京时间）自动运行，也可手动触发 |
 
 ### 常用命令
 
@@ -173,6 +173,27 @@ npm run dev
 | `/merge-to-main`  | 创建合并 PR          | 功能完成后合并          |
 | `/clean-stale`    | 清理超时任务         | 任务卡住时              |
 | `/deploy`         | 触发部署验证         | 部署后测试              |
+
+### 查看工作流运行状态
+
+可以通过以下方式查看工作流的运行情况：
+
+**方式一：GitHub 网页**
+
+直接访问 [Actions 页面](../../actions) 查看所有工作流运行记录。
+
+**方式二：GitHub CLI**
+
+```bash
+# 查看特定工作流的运行记录
+gh run list --workflow=weekly-maintenance.yml
+
+# 查看最近 5 次运行
+gh run list --workflow=weekly-maintenance.yml --limit=5
+
+# 查看某次运行的详情
+gh run view <run-id>
+```
 
 ### 完整工作流文档
 

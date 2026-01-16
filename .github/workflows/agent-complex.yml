@@ -71,52 +71,28 @@ jobs:
             console.log("=".repeat(60));
             console.log(`Issue #${issueNumber}: ${title}`);
 
-            // 从 body 解析类型信息
-            // 匹配: "类型: 全栈（后端 + 前端）" 或 "**类型**: 后端" 等
+            // 解析任务类型（用于日志和标签）
             const typeMatch = body.match(/类型[：:]\s*(.+)/i);
             const typeText = typeMatch ? typeMatch[1].toLowerCase() : '';
+            const titleUpper = title.toUpperCase();
 
-            let agentType = null;
-            let agentWorkflow = null;
-            let isFullstack = false;
-
-            // 优先从 body 判断
-            if (typeText.includes('全栈') || typeText.includes('后端') && typeText.includes('前端')) {
-              isFullstack = true;
-              agentType = 'backend';
-              agentWorkflow = 'agent-be.yml';
-              console.log("📌 检测到全栈任务，先触发后端 Agent");
-            } else if (typeText.includes('后端') || typeText.includes('backend')) {
-              agentType = 'backend';
-              agentWorkflow = 'agent-be.yml';
-              console.log("📌 检测到后端任务");
-            } else if (typeText.includes('前端') || typeText.includes('frontend')) {
-              agentType = 'frontend';
-              agentWorkflow = 'agent-fe.yml';
-              console.log("📌 检测到前端任务");
+            let taskType = 'unknown';
+            if (typeText.includes('全栈') || titleUpper.includes('[BE+FE]') || titleUpper.includes('[FE+BE]')) {
+              taskType = 'fullstack';
+              console.log("📌 检测到全栈任务 [BE+FE]");
+            } else if (typeText.includes('后端') || titleUpper.includes('[BE]')) {
+              taskType = 'backend';
+              console.log("📌 检测到后端任务 [BE]");
+            } else if (typeText.includes('前端') || titleUpper.includes('[FE]')) {
+              taskType = 'frontend';
+              console.log("📌 检测到前端任务 [FE]");
             } else {
-              // 从标题判断
-              const titleUpper = title.toUpperCase();
-              if (titleUpper.includes('[BE+FE]') || titleUpper.includes('[FE+BE]') || titleUpper.includes('[FULLSTACK]')) {
-                isFullstack = true;
-                agentType = 'backend';
-                agentWorkflow = 'agent-be.yml';
-                console.log("📌 从标题检测到全栈任务 [BE+FE]，先触发后端 Agent");
-              } else if (titleUpper.includes('[BE]') || titleUpper.includes('[BACKEND]')) {
-                agentType = 'backend';
-                agentWorkflow = 'agent-be.yml';
-                console.log("📌 从标题检测到后端任务 [BE]");
-              } else if (titleUpper.includes('[FE]') || titleUpper.includes('[FRONTEND]')) {
-                agentType = 'frontend';
-                agentWorkflow = 'agent-fe.yml';
-                console.log("📌 从标题检测到前端任务 [FE]");
-              } else {
-                // 默认使用 agent-medium
-                agentType = 'medium';
-                agentWorkflow = 'agent-medium.yml';
-                console.log("📌 未识别类型，使用 Medium Agent");
-              }
+              console.log("📌 未识别具体类型，按通用任务处理");
             }
+
+            // 所有任务统一使用 agent-medium 执行
+            const agentWorkflow = 'agent-medium.yml';
+            console.log(`📌 触发 ${agentWorkflow} 开始执行任务`);
 
             // 发布评论
             await github.rest.issues.createComment({
@@ -124,11 +100,11 @@ jobs:
               repo: context.repo.repo,
               issue_number: issueNumber,
               body: [
-                "📋 **Complex Agent - 任务路由**",
+                "📋 **Complex Agent - 开始执行**",
                 "",
-                `检测到任务类型: **${agentType}**`,
+                `任务类型: **${taskType}**`,
                 "",
-                `正在触发 \`${agentWorkflow}\`...`,
+                `正在触发 \`${agentWorkflow}\` 开始写代码...`,
                 "",
                 "---",
                 "> 🤖 由 Vibe Complex Agent 处理"
@@ -145,11 +121,14 @@ jobs:
               });
             } catch (e) {}
 
+            const labels = ['🤖 ai-processing'];
+            if (taskType !== 'unknown') labels.push(taskType);
+
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
-              labels: ['🤖 ai-processing', `agent:${agentType}`]
+              labels: labels
             });
 
             // 触发对应 Agent
@@ -170,7 +149,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: issueNumber,
-                body: `✅ **${agentType.charAt(0).toUpperCase() + agentType.slice(1)} Agent 已触发**\n\n> 📊 可通过 [Actions](/${context.repo.owner}/${context.repo.repo}/actions) 查看执行状态`
+                body: `✅ **Agent 已触发，开始写代码**\n\n任务类型: ${taskType}\n\n> 📊 可通过 [Actions](/${context.repo.owner}/${context.repo.repo}/actions) 查看执行状态`
               });
 
             } catch (err) {

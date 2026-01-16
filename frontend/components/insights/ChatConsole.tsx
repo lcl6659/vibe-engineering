@@ -80,11 +80,11 @@ export function ChatConsole({
             />
 
             {/* 对话历史 */}
-            {isLoading && messages.length === 0 ? (
+            {isLoading && (!messages || messages.length === 0) ? (
               <div className="flex items-center justify-center py-8">
                 <p className="text-sm text-muted-foreground">加载对话历史中...</p>
               </div>
-            ) : messages.length === 0 && !isStreaming ? (
+            ) : (!messages || messages.length === 0) && !isStreaming ? (
               <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
                 <Bot className="w-12 h-12 text-muted-foreground/50 mb-4" />
                 <p className="text-base text-foreground font-medium mb-2">
@@ -96,7 +96,7 @@ export function ChatConsole({
               </div>
             ) : (
               <>
-                {messages.map((message) => (
+                {messages?.map((message) => (
                   <ChatMessage key={message.id} message={message} />
                 ))}
 

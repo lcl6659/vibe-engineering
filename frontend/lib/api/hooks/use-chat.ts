@@ -64,7 +64,7 @@ export function useChat(options: UseChatOptions): UseChatReturn {
       setIsLoading(true);
       setError(null);
       const response = await chatService.getChatHistory(insightId);
-      setMessages(response.messages);
+      setMessages(response.messages || []);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err);

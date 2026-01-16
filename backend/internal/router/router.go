@@ -47,6 +47,10 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 	parserService := services.NewParserService(log)
 	parseHandler := handlers.NewParseHandler(parserService, log)
 
+	// Analysis handlers
+	analysisRepo := repository.NewAnalysisRepository(db.DB)
+	analysisHandler := handlers.NewAnalysisHandler(analysisRepo, log)
+
 	// YouTube video analysis handlers
 	videoRepo := repository.NewVideoRepository(db.DB)
 	youtubeService := services.NewYouTubeService(cfg.OpenRouterAPIKey, cfg.GeminiModel, log)
@@ -76,6 +80,16 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 	{
 		// Parse routes
 		api.POST("/parse", parseHandler.Parse)
+
+		// Analysis routes
+		analysis := api.Group("/analysis")
+		{
+			analysis.GET("", analysisHandler.List)
+			analysis.POST("", analysisHandler.Create)
+			analysis.GET("/:id", analysisHandler.Get)
+			analysis.PATCH("/:id", analysisHandler.Update)
+			analysis.DELETE("/:id", analysisHandler.Delete)
+		}
 
 		// Pomodoro routes
 		pomodoros := api.Group("/pomodoros")

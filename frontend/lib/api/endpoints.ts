@@ -173,6 +173,38 @@ export const insightApi = {
     apiClient.delete<{ message: string }>(
       `/v1/insights/${insightId}/highlights/${highlightId}`
     ),
+
+  /**
+   * Share an insight
+   * @param insightId - Insight ID
+   * @param data - Share configuration
+   */
+  shareInsight: (
+    insightId: number,
+    data: import("./types").ShareInsightRequest
+  ) =>
+    apiClient.post<import("./types").ShareInsightResponse>(
+      `/v1/insights/${insightId}/share`,
+      data
+    ),
+
+  /**
+   * Unshare an insight
+   * @param insightId - Insight ID
+   */
+  unshareInsight: (insightId: number) =>
+    apiClient.delete<{ message: string }>(`/v1/insights/${insightId}/share`),
+
+  /**
+   * Get shared insight by token (public access)
+   * @param token - Share token
+   * @param password - Optional password for protected shares
+   */
+  getSharedInsight: (token: string, password?: string) =>
+    apiClient.get<import("./types").SharedInsightResponse>(
+      `/v1/shared/${token}`,
+      { params: password ? { password } : undefined }
+    ),
 };
 
 /**

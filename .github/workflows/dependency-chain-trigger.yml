@@ -63,13 +63,17 @@ jobs:
               const body = issue.body || '';
               const depends = [];
 
-              // 提取依赖：**前置依赖:** #123, #124 (支持 markdown 加粗格式)
-              const depsMatch = body.match(/\*{0,2}前置依赖\*{0,2}[：:]\s*((?:#\d+(?:,\s*)?)+)/i);
+              // 提取依赖：支持多种格式
+              // - **前置依赖:** #123, #124
+              // - **前置依赖:** #123 #124 (空格分隔)
+              // - 前置依赖: 123, 124 (不带#)
+              const depsMatch = body.match(/\*{0,2}前置依赖\*{0,2}[：:]?\s*((?:#?\d+[\s,]*)+)/i);
               if (depsMatch) {
-                const depNumbers = depsMatch[1].match(/#(\d+)/g);
+                // 提取所有数字
+                const depNumbers = depsMatch[1].match(/\d+/g);
                 if (depNumbers) {
-                  for (const dep of depNumbers) {
-                    depends.push(parseInt(dep.replace('#', '')));
+                  for (const num of depNumbers) {
+                    depends.push(parseInt(num));
                   }
                 }
               }

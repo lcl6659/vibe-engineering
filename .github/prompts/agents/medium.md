@@ -12,6 +12,15 @@
 
 {{body}}
 
+{{#if continuation_context}}
+## 🔄 继续迭代上下文
+
+上一轮迭代的反馈：
+{{continuation_context}}
+
+请基于以上反馈继续完成任务，重点关注未完成的验收标准。
+{{/if}}
+
 ## ⚠️ 重要：你必须完成实际的代码修改
 
 你的任务是 **实际编写代码并创建 PR**，而不仅仅是分析。如果你只做分析而没有写代码，任务就是失败的。
@@ -103,22 +112,33 @@ Closes #{{issue_number}}"
 
 **如果没有创建 PR，任务就是失败的。**
 
-## ⚠️ 必须更新验收标准 Checkbox
+## ⚠️ 必须逐项更新验收标准 Checkbox
 
-在完成任务后，你必须使用 GitHub API 或 `gh` 命令更新 Issue body，将验收标准的 checkbox 从 `- [ ]` 改为 `- [x]`：
+完成一项验收标准后，**仅更新该项的 checkbox**：
+
+1. 获取当前 Issue body
+2. **仅将你确实完成的项目**从 `- [ ]` 改为 `- [x]`
+3. 使用 `gh issue edit` 更新
+
+**重要：不要全部勾选！只勾选你实际完成的项目。**
+
+示例：如果只完成了"添加 API 端点"这一项，只更新这一项：
 
 ```bash
 # 获取当前 Issue body
 CURRENT_BODY=$(gh issue view {{issue_number}} --json body --jq '.body')
 
-# 将未完成的 checkbox 改为已完成（只针对你完成的项目）
-UPDATED_BODY=$(echo "$CURRENT_BODY" | sed 's/- \[ \] /- [x] /g')
+# 仅更新你实际完成的特定项目（示例：更新包含某关键词的行）
+# 方法1: 更新特定内容的 checkbox
+UPDATED_BODY=$(echo "$CURRENT_BODY" | sed '/具体的验收标准文字/s/- \[ \]/- [x]/')
 
-# 更新 Issue body
+# 方法2: 如果你完成了所有验收标准，才使用全局替换
+# UPDATED_BODY=$(echo "$CURRENT_BODY" | sed 's/- \[ \] /- [x] /g')
+
 gh issue edit {{issue_number}} --body "$UPDATED_BODY"
 ```
 
-**不更新 checkbox 等于任务未完成！**
+**不更新 checkbox 等于任务未完成！假勾选会导致验收失败！**
 
 ## 处理"代码已存在"的情况
 

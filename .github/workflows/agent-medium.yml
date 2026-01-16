@@ -91,16 +91,16 @@ jobs:
             for (const run of runs.workflow_runs) {
               if (run.id === currentRunId) continue;
 
-              // 检查运行时间，5分钟内的视为可能重复
+              // 检查运行时间，15分钟内的视为可能重复
               const runTime = new Date(run.created_at);
               const now = new Date();
               const timeDiff = Math.abs(now - runTime);
 
-              if (timeDiff < 5 * 60 * 1000) {
+              if (timeDiff < 15 * 60 * 1000) {
                 console.log(`⚠️ 发现可能的重复运行 (run_id: ${run.id})`);
                 console.log(`   创建时间: ${run.created_at}`);
                 // 检查是否是同一个 issue（通过运行名称或其他方式）
-                // 这里简单地认为 5 分钟内的重复触发需要跳过
+                // 这里简单地认为 15 分钟内的重复触发需要跳过
                 core.setOutput('is_duplicate', 'true');
                 return;
               }
@@ -381,25 +381,44 @@ jobs:
             --max-turns 50
             --allowedTools "Bash,Read,Write,Edit,Glob,Grep,WebFetch"
 
-      - name: Check Claude Execution Result
+      - name: Check and Handle Claude Result
         id: check_result
         run: |
-          if [ "${{ steps.claude.outcome }}" == "failure" ]; then
+          OUTCOME="${{ steps.claude.outcome }}"
+          CONCLUSION="${{ steps.claude.conclusion }}"
+
+          echo "Claude outcome: $OUTCOME"
+          echo "Claude conclusion: $CONCLUSION"
+
+          if [ "$OUTCOME" == "failure" ] || [ "$OUTCOME" == "cancelled" ]; then
             echo "claude_failed=true" >> $GITHUB_OUTPUT
-            # 尝试从日志文件提取错误信息
+
+            # 尝试从多个位置提取错误信息
+            ERROR_MSG=""
             if [ -f "/home/runner/work/_temp/claude-execution-output.json" ]; then
-              ERROR_MSG=$(cat /home/runner/work/_temp/claude-execution-output.json | jq -r '.error // .message // "未知错误"' 2>/dev/null || echo "执行失败，请查看 Actions 日志")
-              echo "error_message<<EOF" >> $GITHUB_OUTPUT
-              echo "$ERROR_MSG" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-            else
-              echo "error_message=Claude 执行失败，请查看 Actions 日志获取详细信息" >> $GITHUB_OUTPUT
+              ERROR_MSG=$(cat /home/runner/work/_temp/claude-execution-output.json | jq -r '.error // .message // empty' 2>/dev/null || true)
             fi
+
+            if [ -z "$ERROR_MSG" ] && [ -f "/home/runner/work/_temp/claude-error.log" ]; then
+              ERROR_MSG=$(head -c 500 /home/runner/work/_temp/claude-error.log 2>/dev/null || true)
+            fi
+
+            if [ -z "$ERROR_MSG" ]; then
+              if [ "$OUTCOME" == "cancelled" ]; then
+                ERROR_MSG="Claude 执行被取消"
+              else
+                ERROR_MSG="执行失败，请查看 Actions 日志获取详细信息"
+              fi
+            fi
+
+            echo "error_message<<EOF" >> $GITHUB_OUTPUT
+            echo "$ERROR_MSG" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
           else
             echo "claude_failed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Fail if Claude Failed
+      - name: Exit on Claude Failure
         if: steps.check_result.outputs.claude_failed == 'true'
         run: |
           echo "Claude execution failed: ${{ steps.check_result.outputs.error_message }}"
@@ -418,32 +437,122 @@ jobs:
 
             // 获取最近创建的 PR（由本次执行创建）
             let prInfo = '';
+            let relatedPR = null;
             try {
-              // 获取最近的 PR
+              // 获取最近的 PR（包括 open 和刚合并的）
               const { data: prs } = await github.rest.pulls.list({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                state: 'open',
+                state: 'all',
                 sort: 'created',
                 direction: 'desc',
-                per_page: 5
+                per_page: 10
               });
 
               // 查找标题或分支包含 issue 编号的 PR
-              const relatedPR = prs.find(pr =>
+              relatedPR = prs.find(pr =>
                 pr.title.includes(`#${issueNumber}`) ||
                 pr.title.toLowerCase().includes(`issue-${issueNumber}`) ||
                 pr.head.ref.includes(`issue-${issueNumber}`) ||
-                pr.body?.includes(`#${issueNumber}`)
+                pr.head.ref.includes(`${issueNumber}`) ||
+                pr.body?.includes(`#${issueNumber}`) ||
+                pr.body?.includes(`Closes #${issueNumber}`) ||
+                pr.body?.includes(`Fixes #${issueNumber}`)
               );
 
               if (relatedPR) {
                 prInfo = `\n\n**创建的 PR**: [#${relatedPR.number} ${relatedPR.title}](${relatedPR.html_url})`;
+                console.log(`✅ 找到关联 PR: #${relatedPR.number}`);
+              } else {
+                console.log(`⚠️ 未找到关联 PR`);
               }
             } catch (e) {
               console.log("获取 PR 信息失败:", e.message);
             }
 
+            // 关键检查：如果没有找到 PR，不能关闭 Issue
+            if (!relatedPR) {
+              console.log(`❌ 未找到关联 PR，不关闭 Issue #${issueNumber}`);
+
+              // 构建警告状态
+              const warningSection = [
+                "## ⚠️ Medium Agent 完成但未创建 PR",
+                "",
+                "**当前阶段**: ⚠️ 代码未提交",
+                "",
+                "```",
+                "████████████████░░░░ 80%",
+                "```",
+                "",
+                "**状态**: ⚠️ 代码可能已写入但未创建 PR",
+                "",
+                "**问题**: Agent 执行完成，但未检测到关联的 Pull Request。",
+                "",
+                "**可能原因**:",
+                "- Agent 未执行 git commit/push",
+                "- Agent 未创建 PR",
+                "- PR 创建失败",
+                "",
+                "**建议**: 请检查 Actions 日志，手动创建 PR 或重新触发 Agent。",
+                "",
+                `**Actions 日志**: [查看详情](/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})`
+              ].join("\n");
+
+              // 更新进度评论为警告状态
+              if (progressCommentId) {
+                try {
+                  const body = isContinuation && existingCommentBody
+                    ? existingCommentBody.split('---')[0] + "---\n\n" + warningSection
+                    : [
+                        "🔧 **Medium Agent**",
+                        "",
+                        "---",
+                        "",
+                        warningSection
+                      ].join("\n");
+
+                  await github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: progressCommentId,
+                    body: body
+                  });
+                } catch (e) {
+                  console.log("无法更新进度评论:", e.message);
+                }
+              }
+
+              // 移除 processing 标签，添加警告标签
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: '🤖 ai-processing'
+                });
+              } catch (e) {}
+
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: 'agent:medium'
+                });
+              } catch (e) {}
+
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['⚠️ no-pr', 'needs-review']
+              });
+
+              // 不关闭 Issue，直接返回
+              return;
+            }
+
+            // 有 PR 的情况：正常完成流程
             // 构建完成状态
             const completionSection = [
               "## ✅ Medium Agent 完成",
@@ -510,7 +619,7 @@ jobs:
               labels: ['✅ ai-completed']
             });
 
-            // 自动关闭 Issue 以触发依赖链
+            // 只有找到 PR 才关闭 Issue
             await github.rest.issues.update({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -569,6 +678,9 @@ jobs:
             } else if (errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {
               errorAnalysis = "执行超时 - 任务过于复杂";
               suggestion = "使用 `/agent-complex` 将任务拆分为多个子任务";
+            } else if (errorMessage.includes("rate limit") || errorMessage.includes("429") || errorMessage.includes("Too Many Requests")) {
+              errorAnalysis = "API 请求限流";
+              suggestion = "等待几分钟后使用 `/agent-medium` 重试";
             } else if (errorMessage.includes("permission") || errorMessage.includes("Permission")) {
               errorAnalysis = "权限不足";
               suggestion = "检查 GitHub Token 权限配置";

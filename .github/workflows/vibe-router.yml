@@ -271,21 +271,69 @@ jobs:
               });
             }
 
-  # 触发对应的 Agent
+  # 触发对应的 Agent (使用 workflow_dispatch 替代 workflow_call，以正确传递 Issue 信息)
   trigger-simple:
     needs: route
     if: needs.route.outputs.complexity == 'S'
-    uses: ./.github/workflows/agent-simple.yml
-    secrets: inherit
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Trigger Simple Agent
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'agent-simple.yml',
+              ref: 'main',
+              inputs: {
+                issue_number: String(context.payload.issue.number)
+              }
+            });
+            console.log(`🚀 已触发 Simple Agent for Issue #${context.payload.issue.number}`);
 
   trigger-medium:
     needs: route
     if: needs.route.outputs.complexity == 'M'
-    uses: ./.github/workflows/agent-medium.yml
-    secrets: inherit
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Trigger Medium Agent
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'agent-medium.yml',
+              ref: 'main',
+              inputs: {
+                issue_number: String(context.payload.issue.number)
+              }
+            });
+            console.log(`🚀 已触发 Medium Agent for Issue #${context.payload.issue.number}`);
 
   trigger-complex:
     needs: route
     if: needs.route.outputs.complexity == 'L'
-    uses: ./.github/workflows/agent-complex.yml
-    secrets: inherit
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Trigger Complex Agent
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'agent-complex.yml',
+              ref: 'main',
+              inputs: {
+                issue_number: String(context.payload.issue.number)
+              }
+            });
+            console.log(`🚀 已触发 Complex Agent for Issue #${context.payload.issue.number}`);

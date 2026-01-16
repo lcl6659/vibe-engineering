@@ -6,6 +6,7 @@ import type { InsightDetailResponse } from "@/lib/api/types";
 import { VideoPreview } from "./VideoPreview";
 import { SummarySection } from "./SummarySection";
 import { TranscriptView } from "./TranscriptView";
+import { ShareButton } from "./ShareButton";
 import { Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -176,6 +177,20 @@ export function InsightCanvas({ insightId }: InsightCanvasProps) {
   return (
     <ScrollArea className="flex-1">
       <div className="max-w-4xl mx-auto p-6 space-y-6">
+        {/* Header with title and share button */}
+        <div className="flex items-start justify-between gap-4">
+          <h1 className="text-xl font-semibold leading-tight flex-1">
+            {insight.title}
+          </h1>
+          <ShareButton
+            insightId={insight.id}
+            insightTitle={insight.title}
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+          />
+        </div>
+
         {/* Video Preview */}
         {insight.source_type === "youtube" && insight.source_id && (
           <VideoPreview

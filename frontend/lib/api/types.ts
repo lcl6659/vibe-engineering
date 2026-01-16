@@ -246,3 +246,52 @@ export interface AnalyzeEntitiesResponse {
   suggestions: Suggestion[];
 }
 
+/**
+ * 分享功能相关类型定义
+ */
+
+/**
+ * 分享请求
+ */
+export interface ShareInsightRequest {
+  include_summary: boolean;
+  include_key_points: boolean;
+  include_highlights: boolean;
+  include_chat: boolean;
+  is_public: boolean;
+  password?: string;
+}
+
+/**
+ * 分享响应
+ */
+export interface ShareInsightResponse {
+  share_token: string;
+  share_url: string;
+  expires_at?: string;
+}
+
+/**
+ * 公共分享内容
+ */
+export interface SharedContent {
+  summary?: string;
+  key_points?: string[];
+  highlights?: Highlight[];
+  chat?: ChatMessage[];
+}
+
+/**
+ * 公共分享 Insight 响应
+ */
+export interface SharedInsightResponse {
+  title: string;
+  author: string;
+  thumbnail_url: string;
+  shared_by: string;
+  shared_at?: string;
+  source_type: InsightSourceType;
+  source_url: string;
+  content: SharedContent;
+}
+

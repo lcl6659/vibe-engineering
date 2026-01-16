@@ -73,7 +73,11 @@
       "Skill(agent-be)",
       "Bash(gofmt:*)",
       "Bash(for issue in 225 226 227 228)",
-      "Bash(do echo \"=== Issue #$issue ===\" gh api repos/lessthanno/vibe-engineering-playbook/issues/$issue --jq '{title: .title, state: .state, body: .body}')"
+      "Bash(do echo \"=== Issue #$issue ===\" gh api repos/lessthanno/vibe-engineering-playbook/issues/$issue --jq '{title: .title, state: .state, body: .body}')",
+      "Bash(for i in 239 240 241 242 243 244 245)",
+      "Bash(npm run build:*)",
+      "Bash(git checkout:*)",
+      "Bash(gh pr create:*)"
     ]
   }
 }

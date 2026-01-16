@@ -61,6 +61,29 @@ jobs:
               return;
             }
 
+            // 检查最近是否已有 workflow run（防止与 vibe-router 重复触发）
+            try {
+              const { data: runs } = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: workflowFile,
+                per_page: 5
+              });
+
+              const recentRun = runs.workflow_runs.find(run => {
+                const runTime = new Date(run.created_at);
+                const timeDiff = Date.now() - runTime.getTime();
+                return timeDiff < 60 * 1000; // 1分钟内已有运行
+              });
+
+              if (recentRun) {
+                console.log(`⏭️ 检测到最近已触发 (${recentRun.id})，跳过重复触发`);
+                return;
+              }
+            } catch (e) {
+              console.log(`⚠️ 检查重复运行失败: ${e.message}，继续触发`);
+            }
+
             console.log(`🚀 触发 ${agentType} Agent (${workflowFile}) for Issue #${issue.number}`);
 
             try {

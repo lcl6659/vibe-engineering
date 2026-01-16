@@ -30,10 +30,10 @@ module.exports = async ({ github, context, core, mode, specificIssue }) => {
     // 查找其他正在运行的相同任务
     const duplicateRun = runs.workflow_runs.find(run => {
       if (run.id === currentRunId) return false; // 排除自己
-      // 检查是否是相同的 issue 和模式（通过运行时间判断，5分钟内的视为重复）
+      // 检查是否是相同的 issue 和模式（通过运行时间判断，15分钟内的视为重复）
       const runTime = new Date(run.created_at);
       const timeDiff = Math.abs(now - runTime);
-      return timeDiff < 5 * 60 * 1000; // 5分钟内
+      return timeDiff < 15 * 60 * 1000; // 15分钟内
     });
 
     if (duplicateRun) {
@@ -120,7 +120,9 @@ module.exports = async ({ github, context, core, mode, specificIssue }) => {
         continue;
       }
 
-      const checkboxMatch = line.match(/^[\s-]*\[([x ])\]\s*(.+)/i);
+      // 改进后的正则，支持嵌套列表和各种缩进格式
+      // 匹配: "  - [ ] text", "* [x] text", "    - [ ] text" 等
+      const checkboxMatch = line.match(/^\s*[-*]\s*\[([x ])\]\s*(.+)/i);
       if (checkboxMatch) {
         criteria.push({
           completed: checkboxMatch[1].toLowerCase() === 'x',
@@ -166,6 +168,41 @@ module.exports = async ({ github, context, core, mode, specificIssue }) => {
       should_continue: percentage < 100,
       agent_type: agentType
     };
+  }
+
+  // 检查是否存在关联的 PR
+  async function checkRelatedPR(issueNumber) {
+    try {
+      const { data: prs } = await github.rest.pulls.list({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        state: 'all',
+        sort: 'created',
+        direction: 'desc',
+        per_page: 20
+      });
+
+      const relatedPR = prs.find(pr =>
+        pr.title.includes(`#${issueNumber}`) ||
+        pr.title.toLowerCase().includes(`issue-${issueNumber}`) ||
+        pr.head.ref.includes(`issue-${issueNumber}`) ||
+        pr.head.ref.includes(`${issueNumber}`) ||
+        pr.body?.includes(`#${issueNumber}`) ||
+        pr.body?.includes(`Closes #${issueNumber}`) ||
+        pr.body?.includes(`Fixes #${issueNumber}`)
+      );
+
+      if (relatedPR) {
+        console.log(`    ✅ 找到关联 PR: #${relatedPR.number} (${relatedPR.state})`);
+        return relatedPR;
+      }
+
+      console.log(`    ⚠️ 未找到关联 PR`);
+      return null;
+    } catch (error) {
+      console.error(`    ❌ 检查 PR 失败: ${error.message}`);
+      return null;
+    }
   }
 
   // 从 Agent 评论中解析已完成项
@@ -315,8 +352,32 @@ module.exports = async ({ github, context, core, mode, specificIssue }) => {
     const issueLabels = issue.labels.map(l => l.name);
     const isSubIssue = issueLabels.includes('sub-issue');
 
+    // 关键检查：验收前必须有关联的 PR
+    const relatedPR = await checkRelatedPR(issue.number);
+    if (!relatedPR) {
+      console.log(`  ❌ 验收失败：未找到关联的 PR`);
+
+      await github.rest.issues.createComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: issue.number,
+        body: `## ⚠️ 验收失败：缺少 PR\n\n**完成度**: ${evaluation.completion_percentage}%\n\n**问题**: 所有验收标准的 checkbox 已勾选，但未找到关联的 Pull Request。\n\n**可能原因**:\n- Agent 未执行 git commit/push\n- Agent 未创建 PR\n- PR 创建失败\n\n**建议**: 请检查代码是否已提交，手动创建 PR 后重新验收。\n\n---\n> 🔍 由 Vibe Continuous 自动验收`
+      });
+
+      await github.rest.issues.addLabels({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: issue.number,
+        labels: ['⚠️ no-pr', 'needs-review']
+      });
+
+      return false;
+    }
+
+    const prInfo = `**关联 PR**: [#${relatedPR.number} ${relatedPR.title}](${relatedPR.html_url}) (${relatedPR.state})`;
+
     // 移除进行中的标签
-    const labelsToRemove = ['🤖 ai-processing', '❌ ai-failed', 'needs-review', 'agent:medium', 'agent:simple', 'agent:complex'];
+    const labelsToRemove = ['🤖 ai-processing', '❌ ai-failed', 'needs-review', 'agent:medium', 'agent:simple', 'agent:complex', '⚠️ no-pr'];
     for (const label of labelsToRemove) {
       try {
         await github.rest.issues.removeLabel({
@@ -333,7 +394,7 @@ module.exports = async ({ github, context, core, mode, specificIssue }) => {
         owner: context.repo.owner,
         repo: context.repo.repo,
         issue_number: issue.number,
-        body: `## ✅ 验收通过\n\n**完成度**: ${evaluation.completion_percentage}%\n\n**已完成项目**:\n${evaluation.completed_items.map(i => '- [x] ' + i).join('\n')}\n\n此 Issue 为子任务，验收通过后自动关闭以触发依赖链中的下一个任务。\n\n---\n> 🔍 由 Vibe Continuous 自动验收`
+        body: `## ✅ 验收通过\n\n**完成度**: ${evaluation.completion_percentage}%\n\n${prInfo}\n\n**已完成项目**:\n${evaluation.completed_items.map(i => '- [x] ' + i).join('\n')}\n\n此 Issue 为子任务，验收通过后自动关闭以触发依赖链中的下一个任务。\n\n---\n> 🔍 由 Vibe Continuous 自动验收`
       });
 
       await github.rest.issues.update({
@@ -349,7 +410,7 @@ module.exports = async ({ github, context, core, mode, specificIssue }) => {
         owner: context.repo.owner,
         repo: context.repo.repo,
         issue_number: issue.number,
-        body: `## ✅ 验收通过\n\n**完成度**: ${evaluation.completion_percentage}%\n\n**已完成项目**:\n${evaluation.completed_items.map(i => '- [x] ' + i).join('\n')}\n\n所有验收标准已满足，请确认后关闭此 Issue。\n\n---\n> 🔍 由 Vibe Continuous 自动验收`
+        body: `## ✅ 验收通过\n\n**完成度**: ${evaluation.completion_percentage}%\n\n${prInfo}\n\n**已完成项目**:\n${evaluation.completed_items.map(i => '- [x] ' + i).join('\n')}\n\n所有验收标准已满足，请确认后关闭此 Issue。\n\n---\n> 🔍 由 Vibe Continuous 自动验收`
       });
 
       await github.rest.issues.addLabels({
@@ -361,6 +422,8 @@ module.exports = async ({ github, context, core, mode, specificIssue }) => {
 
       console.log(`  🎉 Issue #${issue.number} 验收通过，等待用户最终确认`);
     }
+
+    return true;
   }
 
   // 主逻辑

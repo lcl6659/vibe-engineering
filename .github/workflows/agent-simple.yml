@@ -2,14 +2,25 @@ name: Simple Task Agent
 
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue 编号'
+        required: true
+        type: string
+      continuation_context:
+        description: '继续迭代的上下文信息'
+        required: false
+        type: string
   issue_comment:
     types: [created]
 
 jobs:
   simple-task:
-    # 通过 workflow_call 或 /agent-simple 命令触发
+    # 通过 workflow_call、workflow_dispatch 或 /agent-simple 命令触发
     if: |
       github.event_name == 'workflow_call' ||
+      github.event_name == 'workflow_dispatch' ||
       contains(github.event.comment.body, '/agent-simple')
     runs-on: ubuntu-latest
 
@@ -29,19 +40,48 @@ jobs:
           git config user.name "vibe-simple-agent"
           git config user.email "agent@vibe.bot"
 
+      - name: Get Issue Info
+        id: issue_info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let issueNumber;
+            let issue;
+
+            if (context.eventName === 'workflow_dispatch') {
+              // workflow_dispatch 触发时从 inputs 获取
+              issueNumber = parseInt('${{ github.event.inputs.issue_number }}');
+              const { data } = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+              issue = data;
+            } else {
+              // issue_comment 或 workflow_call 触发
+              issue = context.payload.issue;
+              issueNumber = issue.number;
+            }
+
+            core.setOutput('issue_number', issueNumber);
+            core.setOutput('issue_title', issue.title);
+            core.setOutput('issue_body', issue.body || '');
+
+            return { issueNumber, title: issue.title, body: issue.body };
+
       - name: Update Issue Status
         id: update_issue_status
         uses: actions/github-script@v7
         with:
           script: |
-            const issue = context.payload.issue;
+            const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
 
             // 更新标签
             try {
               await github.rest.issues.removeLabel({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issue.number,
+                issue_number: issueNumber,
                 name: 'complexity:simple'
               });
             } catch (e) {}
@@ -49,7 +89,7 @@ jobs:
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issue.number,
+              issue_number: issueNumber,
               labels: ['🤖 ai-processing', 'agent:simple']
             });
             
@@ -57,7 +97,7 @@ jobs:
             const progressComment = await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issue.number,
+              issue_number: issueNumber,
               body: [
                 "⚡ **Simple Agent 启动**",
                 "",
@@ -85,7 +125,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const issue = context.payload.issue;
+            const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
             const progressCommentId = ${{ steps.update_issue_status.outputs.progress_comment_id }};
             
             if (progressCommentId) {
@@ -122,16 +162,16 @@ jobs:
           variables: |
             {
               "repository": "${{ github.repository }}",
-              "issue_number": "${{ github.event.issue.number }}",
-              "title": ${{ toJson(github.event.issue.title) }},
-              "body": ${{ toJson(github.event.issue.body) }}
+              "issue_number": "${{ steps.issue_info.outputs.issue_number }}",
+              "title": ${{ toJson(steps.issue_info.outputs.issue_title) }},
+              "body": ${{ toJson(steps.issue_info.outputs.issue_body) }}
             }
 
       - name: Update Progress - Running Claude
         uses: actions/github-script@v7
         with:
           script: |
-            const issue = context.payload.issue;
+            const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
             const progressCommentId = ${{ steps.update_issue_status.outputs.progress_comment_id }};
             
             if (progressCommentId) {
@@ -182,7 +222,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const issue = context.payload.issue;
+            const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
             const progressCommentId = ${{ steps.update_issue_status.outputs.progress_comment_id }};
 
             // 更新进度评论为完成状态
@@ -221,7 +261,7 @@ jobs:
               await github.rest.issues.removeLabel({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issue.number,
+                issue_number: issueNumber,
                 name: '🤖 ai-processing'
               });
             } catch (e) {}
@@ -229,7 +269,7 @@ jobs:
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issue.number,
+              issue_number: issueNumber,
               labels: ['✅ ai-completed']
             });
 
@@ -237,7 +277,7 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issue.number,
+              issue_number: issueNumber,
               body: [
                 "✅ **Simple Agent 完成**",
                 "",
@@ -253,7 +293,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const issue = context.payload.issue;
+            const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
             const progressCommentId = ${{ steps.update_issue_status.outputs.progress_comment_id }};
 
             // 更新进度评论为失败状态
@@ -291,7 +331,7 @@ jobs:
               await github.rest.issues.removeLabel({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issue.number,
+                issue_number: issueNumber,
                 name: '🤖 ai-processing'
               });
             } catch (e) {}
@@ -299,14 +339,14 @@ jobs:
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issue.number,
+              issue_number: issueNumber,
               labels: ['❌ ai-failed', 'needs-review']
             });
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issue.number,
+              issue_number: issueNumber,
               body: [
                 "❌ **Simple Agent 失败**",
                 "",

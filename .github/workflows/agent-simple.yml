@@ -217,6 +217,7 @@ jobs:
           claude_args: |
             --model anthropic/claude-sonnet-4
             --max-turns 30
+            --allowedTools "Bash,Read,Write,Edit,Glob,Grep,WebFetch"
 
       - name: Check Claude Execution Result
         id: check_result

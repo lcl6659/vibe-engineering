@@ -2,13 +2,17 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"vibe-backend/internal/models"
@@ -629,6 +633,186 @@ func (h *InsightHandler) Process(c *gin.Context) {
 	})
 }
 
+// ShareInsight creates or updates a share configuration for an insight.
+// POST /api/v1/insights/:id/share
+func (h *InsightHandler) ShareInsight(c *gin.Context) {
+	insightIDStr := c.Param("id")
+	insightID, err := strconv.ParseUint(insightIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":      "无效的 Insight ID",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	var req models.ShareInsightRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":      err.Error(),
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	// TODO: Get user ID from JWT token
+	userID := uint(1)
+
+	// Verify insight exists and user owns it
+	insight, err := h.repo.GetByID(c.Request.Context(), uint(insightID))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":      "Insight 不存在",
+				"request_id": c.GetString("request_id"),
+			})
+			return
+		}
+		h.log.Error("Failed to get insight", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      "获取 Insight 失败",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	if insight.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":      "无权限分享此 Insight",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	// Generate share token if not exists
+	if insight.ShareToken == nil || *insight.ShareToken == "" {
+		token, err := h.generateShareToken()
+		if err != nil {
+			h.log.Error("Failed to generate share token", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":      "生成分享链接失败",
+				"request_id": c.GetString("request_id"),
+			})
+			return
+		}
+		insight.ShareToken = &token
+	}
+
+	// Hash password if provided
+	if req.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			h.log.Error("Failed to hash password", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":      "密码加密失败",
+				"request_id": c.GetString("request_id"),
+			})
+			return
+		}
+		insight.SharePassword = string(hashedPassword)
+	} else {
+		insight.SharePassword = ""
+	}
+
+	// Set share configuration
+	shareConfig := models.ShareConfigData{
+		IncludeSummary:    req.IncludeSummary,
+		IncludeKeyPoints:  req.IncludeKeyPoints,
+		IncludeHighlights: req.IncludeHighlights,
+		IncludeChat:       req.IncludeChat,
+	}
+
+	shareConfigJSON, err := json.Marshal(shareConfig)
+	if err != nil {
+		h.log.Error("Failed to marshal share config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      "保存分享配置失败",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	insight.ShareConfig = shareConfigJSON
+	insight.IsPublic = req.IsPublic
+	now := time.Now()
+	insight.SharedAt = &now
+
+	if err := h.repo.Update(c.Request.Context(), insight); err != nil {
+		h.log.Error("Failed to update insight share config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      "更新分享配置失败",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": models.ShareInsightResponse{
+			ShareToken: *insight.ShareToken,
+			ShareURL:   "/api/v1/shared/" + *insight.ShareToken,
+		},
+	})
+}
+
+// DeleteShare removes the share configuration for an insight.
+// DELETE /api/v1/insights/:id/share
+func (h *InsightHandler) DeleteShare(c *gin.Context) {
+	insightIDStr := c.Param("id")
+	insightID, err := strconv.ParseUint(insightIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":      "无效的 Insight ID",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	// TODO: Get user ID from JWT token
+	userID := uint(1)
+
+	insight, err := h.repo.GetByID(c.Request.Context(), uint(insightID))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":      "Insight 不存在",
+				"request_id": c.GetString("request_id"),
+			})
+			return
+		}
+		h.log.Error("Failed to get insight", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      "获取 Insight 失败",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	if insight.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":      "无权限操作此 Insight",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	// Clear share configuration
+	insight.ShareToken = nil
+	insight.SharePassword = ""
+	insight.ShareConfig = nil
+	insight.IsPublic = false
+	insight.SharedAt = nil
+
+	if err := h.repo.Update(c.Request.Context(), insight); err != nil {
+		h.log.Error("Failed to delete share config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      "删除分享配置失败",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "分享已取消"})
+}
+
 // GetShared returns a publicly shared insight.
 // GET /api/v1/shared/:token
 func (h *InsightHandler) GetShared(c *gin.Context) {
@@ -640,6 +824,9 @@ func (h *InsightHandler) GetShared(c *gin.Context) {
 		})
 		return
 	}
+
+	// Check for password in request
+	password := c.Query("password")
 
 	insight, err := h.repo.GetByShareToken(c.Request.Context(), token)
 	if err != nil {
@@ -658,8 +845,94 @@ func (h *InsightHandler) GetShared(c *gin.Context) {
 		return
 	}
 
-	// TODO: Apply ShareConfig to filter what's visible
-	c.JSON(http.StatusOK, gin.H{"data": insight})
+	// Verify password if required
+	if insight.SharePassword != "" {
+		if password == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error":         "此分享需要密码访问",
+				"requires_auth": true,
+				"request_id":    c.GetString("request_id"),
+			})
+			return
+		}
+
+		if err := bcrypt.CompareHashAndPassword([]byte(insight.SharePassword), []byte(password)); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error":      "密码错误",
+				"request_id": c.GetString("request_id"),
+			})
+			return
+		}
+	}
+
+	// Parse share configuration
+	var shareConfig models.ShareConfigData
+	if len(insight.ShareConfig) > 0 {
+		if err := json.Unmarshal(insight.ShareConfig, &shareConfig); err != nil {
+			h.log.Warn("Failed to unmarshal share config, using defaults", zap.Error(err))
+			shareConfig = models.ShareConfigData{
+				IncludeSummary:    true,
+				IncludeKeyPoints:  true,
+				IncludeHighlights: false,
+				IncludeChat:       false,
+			}
+		}
+	} else {
+		// Default config if none set
+		shareConfig = models.ShareConfigData{
+			IncludeSummary:    true,
+			IncludeKeyPoints:  true,
+			IncludeHighlights: false,
+			IncludeChat:       false,
+		}
+	}
+
+	// Build filtered response based on share configuration
+	response := models.SharedInsightResponse{
+		Title:        insight.Title,
+		Author:       insight.Author,
+		ThumbnailURL: insight.ThumbnailURL,
+		SharedBy:     "用户",
+		SharedAt:     insight.SharedAt,
+		SourceType:   insight.SourceType,
+		SourceURL:    insight.SourceURL,
+		Content:      models.SharedContent{},
+	}
+
+	// Apply content filtering based on share config
+	if shareConfig.IncludeSummary {
+		response.Content.Summary = insight.Summary
+	}
+
+	if shareConfig.IncludeKeyPoints {
+		var keyPoints []string
+		if len(insight.KeyPoints) > 0 {
+			if err := json.Unmarshal(insight.KeyPoints, &keyPoints); err != nil {
+				h.log.Warn("Failed to unmarshal key_points", zap.Error(err))
+			} else {
+				response.Content.KeyPoints = keyPoints
+			}
+		}
+	}
+
+	if shareConfig.IncludeHighlights && len(insight.Highlights) > 0 {
+		response.Content.Highlights = insight.Highlights
+	}
+
+	if shareConfig.IncludeChat && len(insight.ChatMessages) > 0 {
+		response.Content.Chat = insight.ChatMessages
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+// generateShareToken generates a cryptographically secure random token.
+func (h *InsightHandler) generateShareToken() (string, error) {
+	bytes := make([]byte, 32) // 256 bits
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
 }
 
 // convertToDetailResponse converts an Insight model to InsightDetailResponse.

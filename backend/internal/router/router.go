@@ -151,6 +151,10 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 				insights.DELETE("/:id", insightHandler.Delete)
 				insights.POST("/:id/process", insightHandler.Process)
 
+				// Share routes
+				insights.POST("/:id/share", insightHandler.ShareInsight)
+				insights.DELETE("/:id/share", insightHandler.DeleteShare)
+
 				// Highlight routes
 				insights.GET("/:id/highlights", insightHandler.ListHighlights)
 				insights.POST("/:id/highlights", insightHandler.CreateHighlight)

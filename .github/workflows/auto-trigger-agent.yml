@@ -1,0 +1,96 @@
+name: Auto Trigger Agent by Label
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  check-and-trigger:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: read
+      actions: write
+
+    steps:
+      - name: Check Label and Trigger Agent
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const labelAdded = context.payload.label;
+            const issueLabels = issue.labels.map(l => l.name);
+
+            console.log(`Issue #${issue.number}: 添加标签 "${labelAdded.name}"`);
+            console.log(`当前所有标签: ${issueLabels.join(', ')}`);
+
+            // 检查是否已经在处理中或已完成
+            const skipLabels = ['🤖 ai-processing', '✅ ai-completed', '❌ ai-failed'];
+            if (skipLabels.some(l => issueLabels.includes(l))) {
+              console.log('⏭️ Issue 已在处理中或已完成，跳过');
+              return;
+            }
+
+            // 检查复杂度标签
+            const hasSimple = issueLabels.includes('complexity:simple');
+            const hasMedium = issueLabels.includes('complexity:medium');
+            const hasComplex = issueLabels.includes('complexity:complex');
+
+            // 只在添加复杂度标签时触发
+            if (!['complexity:simple', 'complexity:medium', 'complexity:complex'].includes(labelAdded.name)) {
+              console.log('⏭️ 添加的标签不是复杂度标签，跳过');
+              return;
+            }
+
+            // 确定要触发的 workflow
+            let workflowFile = null;
+            let agentType = null;
+
+            if (hasSimple) {
+              workflowFile = 'agent-simple.yml';
+              agentType = 'Simple';
+            } else if (hasMedium) {
+              workflowFile = 'agent-medium.yml';
+              agentType = 'Medium';
+            } else if (hasComplex) {
+              workflowFile = 'agent-complex.yml';
+              agentType = 'Complex';
+            }
+
+            if (!workflowFile) {
+              console.log('⏭️ 没有匹配的复杂度标签');
+              return;
+            }
+
+            console.log(`🚀 触发 ${agentType} Agent (${workflowFile}) for Issue #${issue.number}`);
+
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: workflowFile,
+                ref: 'main',
+                inputs: {
+                  issue_number: String(issue.number)
+                }
+              });
+
+              console.log(`✅ 成功触发 ${agentType} Agent`);
+
+              // 添加评论通知
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `🤖 **${agentType} Agent 已自动触发**\n\n检测到 \`${labelAdded.name}\` 标签，正在启动 AI Agent 处理此任务...\n\n> 📊 可通过 [Actions](/${context.repo.owner}/${context.repo.repo}/actions) 查看执行状态`
+              });
+
+            } catch (error) {
+              console.error(`❌ 触发失败: ${error.message}`);
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `⚠️ **自动触发失败**\n\n无法自动启动 Agent: ${error.message}\n\n请手动使用 \`/agent-${agentType.toLowerCase()}\` 命令触发。`
+              });
+            }

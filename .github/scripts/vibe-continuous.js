@@ -287,6 +287,34 @@ module.exports = async ({ github, context, core, mode, specificIssue }) => {
     const currentIteration = iterationMatch ? parseInt(iterationMatch[1]) : 0;
     const maxIterations = config.continuous?.max_iterations_per_issue || 10;
 
+    // 清理所有状态标签，让 agent 可以正常运行
+    const labelsToRemove = [
+      '🤖 ai-processing',
+      '❌ ai-failed',
+      '✅ ai-completed',
+      'needs-review',
+      '⚠️ iteration-limit',
+      '⚠️ stale',
+      '⚠️ no-pr',
+      'agent:simple',
+      'agent:medium',
+      'agent:complex'
+    ];
+
+    for (const label of labelsToRemove) {
+      try {
+        await github.rest.issues.removeLabel({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          issue_number: issue.number,
+          name: label
+        });
+      } catch (e) {
+        // 标签不存在，忽略
+      }
+    }
+    console.log(`  🧹 已清理状态标签`);
+
     if (currentIteration >= maxIterations) {
       console.log(`⚠️ Issue #${issue.number} 已达最大迭代次数 (${maxIterations})`);
 
@@ -426,7 +454,169 @@ module.exports = async ({ github, context, core, mode, specificIssue }) => {
     return true;
   }
 
-  // 主逻辑
+  // ============ 监控功能（原 vibe-monitor.yml）============
+
+  // 处理超时任务
+  async function handleStaleIssues() {
+    const STALE_HOURS = config.monitor?.stale_threshold_hours || 4;
+
+    const { data: allIssues } = await github.rest.issues.listForRepo({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      state: 'open',
+      per_page: 100
+    });
+
+    const staleIssues = allIssues.filter(issue => {
+      const labels = issue.labels.map(l => l.name);
+      if (!labels.includes('🤖 ai-processing')) return false;
+
+      const updatedAt = new Date(issue.updated_at);
+      const hoursSinceUpdate = (now - updatedAt) / (1000 * 60 * 60);
+      return hoursSinceUpdate > STALE_HOURS;
+    });
+
+    console.log(`\n⚠️ 找到 ${staleIssues.length} 个超时任务（超过 ${STALE_HOURS} 小时）\n`);
+
+    for (const issue of staleIssues) {
+      const updatedAt = new Date(issue.updated_at);
+      const hoursSinceUpdate = ((now - updatedAt) / (1000 * 60 * 60)).toFixed(1);
+      console.log(`  ⚠️ #${issue.number}: ${issue.title} (${hoursSinceUpdate}h)`);
+
+      // 移除 processing 标签
+      try {
+        await github.rest.issues.removeLabel({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          issue_number: issue.number,
+          name: '🤖 ai-processing'
+        });
+      } catch (e) {}
+
+      await github.rest.issues.addLabels({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: issue.number,
+        labels: ['⚠️ stale', 'needs-review']
+      });
+
+      await github.rest.issues.createComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: issue.number,
+        body: [
+          "⚠️ **任务超时**",
+          "",
+          `此任务已超过 ${STALE_HOURS} 小时未更新，已自动标记为超时。`,
+          "",
+          "**可能的原因:**",
+          "- Workflow 执行时间过长",
+          "- API 调用失败",
+          "- Workflow 被取消",
+          "",
+          "**解决方案:**",
+          "- 查看 Actions 日志确认状态",
+          "- 使用对应的 `/agent-*` 命令重试",
+          "",
+          "---",
+          "> 🔍 由 Vibe Continuous 自动检测"
+        ].join("\n")
+      });
+    }
+
+    return staleIssues.length;
+  }
+
+  // 重试失败任务
+  async function handleFailedIssues() {
+    const RETRY_LIMIT = config.monitor?.retry_limit || 3;
+
+    const { data: allIssues } = await github.rest.issues.listForRepo({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      state: 'open',
+      labels: '❌ ai-failed',
+      per_page: 100
+    });
+
+    console.log(`\n🔄 找到 ${allIssues.length} 个失败任务\n`);
+
+    let retriedCount = 0;
+    for (const issue of allIssues) {
+      const retryMatch = issue.body?.match(/Retry count: (\d+)/);
+      const retryCount = retryMatch ? parseInt(retryMatch[1]) : 0;
+
+      if (retryCount >= RETRY_LIMIT) {
+        console.log(`  ⏭️ #${issue.number}: 已达重试上限 (${retryCount}/${RETRY_LIMIT})`);
+        continue;
+      }
+
+      console.log(`  🔄 #${issue.number}: ${issue.title} (重试 ${retryCount + 1}/${RETRY_LIMIT})`);
+
+      const labels = issue.labels.map(l => l.name);
+      let agentCommand = '/agent-medium';
+      if (labels.includes('complexity:simple')) agentCommand = '/agent-simple';
+      else if (labels.includes('complexity:complex')) agentCommand = '/agent-complex';
+
+      // 移除失败标签
+      try {
+        await github.rest.issues.removeLabel({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          issue_number: issue.number,
+          name: '❌ ai-failed'
+        });
+      } catch (e) {}
+
+      await github.rest.issues.createComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: issue.number,
+        body: [
+          agentCommand,
+          "",
+          "---",
+          "",
+          `🔄 **自动重试** (${retryCount + 1}/${RETRY_LIMIT})`,
+          "",
+          "> 由 Vibe Continuous 自动触发重试"
+        ].join("\n")
+      });
+
+      // 更新重试计数
+      const newBody = issue.body?.includes('Retry count:')
+        ? issue.body.replace(/Retry count: \d+/, `Retry count: ${retryCount + 1}`)
+        : `${issue.body || ''}\n\n---\nRetry count: ${retryCount + 1}`;
+
+      await github.rest.issues.update({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: issue.number,
+        body: newBody
+      });
+
+      retriedCount++;
+    }
+
+    return retriedCount;
+  }
+
+  // ============ 主逻辑 ============
+
+  // 处理监控模式
+  if (mode === 'clean-stale') {
+    const count = await handleStaleIssues();
+    console.log(`\n✅ 已处理 ${count} 个超时任务`);
+    return { stale_cleaned: count };
+  }
+
+  if (mode === 'retry-failed') {
+    const count = await handleFailedIssues();
+    console.log(`\n✅ 已重试 ${count} 个失败任务`);
+    return { retried: count };
+  }
+
+  // 原有的迭代逻辑
   const targetIssues = await getTargetIssues();
   console.log(`\n📋 找到 ${targetIssues.length} 个需要检测的 Issue\n`);
 

@@ -1,0 +1,206 @@
+name: Dependency Chain Trigger
+
+# 当子 Issue 关闭时，检查并触发依赖链中的下一个任务
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  trigger-next-task:
+    # 只处理 sub-issue 标签的 issue
+    if: contains(github.event.issue.labels.*.name, 'sub-issue')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: write
+
+    steps:
+      - name: Check and Trigger Next Task
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const closedIssue = context.payload.issue;
+            const closedIssueNumber = closedIssue.number;
+            const closedIssueBody = closedIssue.body || '';
+
+            console.log("=".repeat(60));
+            console.log("🔗 DEPENDENCY CHAIN TRIGGER");
+            console.log("=".repeat(60));
+            console.log(`✅ Issue #${closedIssueNumber} 已关闭: ${closedIssue.title}`);
+
+            // 从 issue body 中提取 parent issue 编号
+            const parentMatch = closedIssueBody.match(/Parent:\s*#(\d+)/i);
+            if (!parentMatch) {
+              console.log("⏭️ 未找到 Parent Issue，跳过依赖链检查");
+              return;
+            }
+
+            const parentIssueNumber = parseInt(parentMatch[1]);
+            console.log(`📋 Parent Issue: #${parentIssueNumber}`);
+
+            // 获取所有具有相同 parent 的 sub-issues
+            const { data: allIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'sub-issue',
+              per_page: 100
+            });
+
+            // 过滤出同一个 parent 的子任务
+            const siblingIssues = allIssues.filter(issue => {
+              const body = issue.body || '';
+              const match = body.match(/Parent:\s*#(\d+)/i);
+              return match && parseInt(match[1]) === parentIssueNumber;
+            });
+
+            console.log(`📊 同一 Parent 下共有 ${siblingIssues.length} 个子任务`);
+
+            // 解析每个 sibling 的依赖关系
+            const issueMap = new Map(); // number -> { issue, depends_on: [numbers], state }
+
+            for (const issue of siblingIssues) {
+              const body = issue.body || '';
+              const depends = [];
+
+              // 提取依赖：**前置依赖:** #123, #124
+              const depsMatch = body.match(/前置依赖[：:]\s*((?:#\d+(?:,\s*)?)+)/i);
+              if (depsMatch) {
+                const depNumbers = depsMatch[1].match(/#(\d+)/g);
+                if (depNumbers) {
+                  for (const dep of depNumbers) {
+                    depends.push(parseInt(dep.replace('#', '')));
+                  }
+                }
+              }
+
+              issueMap.set(issue.number, {
+                issue: issue,
+                depends_on: depends,
+                state: issue.state
+              });
+
+              console.log(`  - #${issue.number}: ${issue.state}, 依赖: ${depends.length > 0 ? depends.map(d => '#' + d).join(', ') : '无'}`);
+            }
+
+            // 找出依赖刚关闭的 issue 的任务
+            const dependentIssues = [];
+            for (const [number, info] of issueMap.entries()) {
+              if (info.depends_on.includes(closedIssueNumber) && info.state === 'open') {
+                dependentIssues.push(info);
+              }
+            }
+
+            if (dependentIssues.length === 0) {
+              console.log("✅ 没有其他任务依赖此 Issue，依赖链检查完成");
+              return;
+            }
+
+            console.log(`\n🔍 发现 ${dependentIssues.length} 个任务依赖 #${closedIssueNumber}`);
+
+            // 检查每个依赖任务的所有前置依赖是否都已关闭
+            let triggeredCount = 0;
+
+            for (const depInfo of dependentIssues) {
+              const depIssue = depInfo.issue;
+              const allDeps = depInfo.depends_on;
+
+              console.log(`\n📌 检查 #${depIssue.number}: ${depIssue.title}`);
+              console.log(`   所有依赖: ${allDeps.map(d => '#' + d).join(', ')}`);
+
+              // 检查所有依赖是否都已关闭
+              let allDepsClosed = true;
+              for (const depNumber of allDeps) {
+                const depState = issueMap.get(depNumber)?.state;
+                if (depState !== 'closed') {
+                  console.log(`   ❌ 依赖 #${depNumber} 未关闭 (状态: ${depState || '未知'})`);
+                  allDepsClosed = false;
+                }
+              }
+
+              if (!allDepsClosed) {
+                console.log(`   ⏳ 依赖未全部完成，暂不触发`);
+                continue;
+              }
+
+              console.log(`   ✅ 所有依赖已关闭，准备触发 Agent`);
+
+              // 检查是否已经在处理中
+              const labels = depIssue.labels.map(l => l.name);
+              if (labels.includes('🤖 ai-processing')) {
+                console.log(`   ⏭️ 已在处理中，跳过`);
+                continue;
+              }
+              if (labels.includes('✅ ai-completed')) {
+                console.log(`   ⏭️ 已完成，跳过`);
+                continue;
+              }
+
+              // 确定 agent 类型
+              let agentWorkflow = 'agent-medium.yml';
+              let agentType = 'Medium';
+
+              if (labels.includes('complexity:simple')) {
+                agentWorkflow = 'agent-simple.yml';
+                agentType = 'Simple';
+              } else if (labels.includes('complexity:complex')) {
+                agentWorkflow = 'agent-complex.yml';
+                agentType = 'Complex';
+              }
+
+              // 触发 agent
+              try {
+                await github.rest.actions.createWorkflowDispatch({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: agentWorkflow,
+                  ref: 'main',
+                  inputs: {
+                    issue_number: String(depIssue.number)
+                  }
+                });
+
+                console.log(`   🚀 已触发 ${agentType} Agent for #${depIssue.number}`);
+
+                // 发评论通知
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: depIssue.number,
+                  body: [
+                    `🔗 **依赖链触发**`,
+                    ``,
+                    `前置依赖 #${closedIssueNumber} 已完成并关闭，自动启动 ${agentType} Agent。`,
+                    ``,
+                    `**已完成的依赖:**`,
+                    allDeps.map(d => `- ✅ #${d}`).join('\n'),
+                    ``,
+                    `---`,
+                    `> 📊 可通过 [Actions](/${context.repo.owner}/${context.repo.repo}/actions) 查看执行状态`
+                  ].join('\n')
+                });
+
+                triggeredCount++;
+
+              } catch (error) {
+                console.error(`   ❌ 触发失败: ${error.message}`);
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: depIssue.number,
+                  body: [
+                    `⚠️ **自动触发失败**`,
+                    ``,
+                    `前置依赖 #${closedIssueNumber} 已完成，但自动触发失败: ${error.message}`,
+                    ``,
+                    `请手动使用 \`/agent-${agentType.toLowerCase()}\` 命令触发。`
+                  ].join('\n')
+                });
+              }
+            }
+
+            // 汇总
+            console.log("\n" + "=".repeat(60));
+            console.log(`📊 依赖链触发完成: 成功触发 ${triggeredCount} 个任务`);
+            console.log("=".repeat(60));

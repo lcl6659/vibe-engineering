@@ -224,79 +224,31 @@ jobs:
               }
             }
 
-            // 使用 AI 评估完成度
-            async function aiEvaluateCompletion(issue, criteria, prInfo) {
-              const prompt = `
-            你是一个项目验收专家。请评估以下 GitHub Issue 的完成情况。
-
-            ## Issue 信息
-            标题: ${issue.title}
-            描述:
-            ${issue.body?.substring(0, 2000) || '无描述'}
-
-            ## 验收标准
-            ${criteria.map((c, i) => `${i + 1}. [${c.completed ? 'x' : ' '}] ${c.text}`).join('\n')}
-
-            ## 关联 PR 信息
-            ${prInfo || '暂无关联 PR'}
-
-            ## 请分析并返回 JSON 格式：
-            {
-              "completion_percentage": 0-100 的数字,
-              "completed_items": ["已完成的具体项目"],
-              "pending_items": ["未完成的具体项目"],
-              "blocking_issues": ["阻塞问题"],
-              "next_action": "建议的下一步行动",
-              "should_continue": true/false 是否需要继续开发,
-              "agent_type": "simple/medium/complex" 如果需要继续，推荐的 agent 类型
-            }
-            `;
-
-              try {
-                const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                  method: "POST",
-                  headers: {
-                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://github.com/lessthanno/vibe-engineering-playbook",
-                    "X-Title": "Vibe Continuous"
-                  },
-                  body: JSON.stringify({
-                    model: config.continuous?.completion_check_model || "google/gemini-2.0-flash-001",
-                    messages: [{ role: "user", content: prompt }],
-                    temperature: 0.1,
-                    response_format: { type: "json_object" }
-                  })
-                });
-
-                if (!response.ok) {
-                  throw new Error(`API 请求失败: ${response.status}`);
-                }
-
-                const data = await response.json();
-                const content = data.choices?.[0]?.message?.content || '';
-                const jsonMatch = content.match(/\{[\s\S]*\}/);
-
-                if (jsonMatch) {
-                  return JSON.parse(jsonMatch[0]);
-                }
-              } catch (error) {
-                console.error(`AI 评估失败: ${error.message}`);
-              }
-
-              // 回退到基于 checkbox 的简单评估
+            // 直接基于 checkbox 状态评估完成度（不使用 AI）
+            function evaluateCompletion(issue, criteria) {
               const completed = criteria.filter(c => c.completed).length;
               const total = criteria.length;
               const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
 
+              const completedItems = criteria.filter(c => c.completed).map(c => c.text);
+              const pendingItems = criteria.filter(c => !c.completed).map(c => c.text);
+
+              // 根据任务复杂度推荐 agent 类型
+              let agentType = 'medium';
+              if (pendingItems.length <= 2) {
+                agentType = 'simple';
+              } else if (pendingItems.length > 5) {
+                agentType = 'complex';
+              }
+
               return {
                 completion_percentage: percentage,
-                completed_items: criteria.filter(c => c.completed).map(c => c.text),
-                pending_items: criteria.filter(c => !c.completed).map(c => c.text),
+                completed_items: completedItems,
+                pending_items: pendingItems,
                 blocking_issues: [],
-                next_action: percentage < 100 ? "继续完成未实现的功能" : "准备合并",
+                next_action: percentage < 100 ? `继续完成剩余 ${pendingItems.length} 项任务` : "所有验收标准已满足",
                 should_continue: percentage < 100,
-                agent_type: "medium"
+                agent_type: agentType
               };
             }
 
@@ -444,9 +396,9 @@ jobs:
                 console.log(`  🔗 关联 PR: ${relatedPRs.length} 个`);
               }
 
-              // AI 评估完成度
-              const evaluation = await aiEvaluateCompletion(issue, criteria, prInfo);
-              console.log(`  📊 AI 评估完成度: ${evaluation.completion_percentage}%`);
+              // 基于 checkbox 状态评估完成度（直接看 Issue body 中的 checkbox）
+              const evaluation = evaluateCompletion(issue, criteria);
+              console.log(`  📊 Checkbox 完成度: ${evaluation.completion_percentage}%`);
               results.checked++;
 
               // 判断是否需要继续
@@ -495,35 +447,72 @@ jobs:
                     } catch (e) {}
                   }
 
-                  // 发布验收通过评论（不自动关闭，等待用户最终确认）
-                  await github.rest.issues.createComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: issue.number,
-                    body: [
-                      "## ✅ 验收通过",
-                      "",
-                      `**完成度**: ${evaluation.completion_percentage}%`,
-                      "",
-                      "**已完成项目**:",
-                      evaluation.completed_items.map(i => `- [x] ${i}`).join('\n'),
-                      "",
-                      "所有验收标准已满足，请确认后关闭此 Issue。",
-                      "",
-                      "---",
-                      "> 🔍 由 Vibe Continuous 自动验收"
-                    ].join("\n")
-                  });
+                  // 检查是否是 sub-issue（依赖链中的子任务）
+                  const issueLabels = issue.labels.map(l => l.name);
+                  const isSubIssue = issueLabels.includes('sub-issue');
 
-                  // 添加等待确认标签
-                  await github.rest.issues.addLabels({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: issue.number,
-                    labels: ['📋 pending-confirmation']
-                  });
+                  if (isSubIssue) {
+                    // sub-issue 验收通过后自动关闭，以触发依赖链中的下一个任务
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      body: [
+                        "## ✅ 验收通过",
+                        "",
+                        `**完成度**: ${evaluation.completion_percentage}%`,
+                        "",
+                        "**已完成项目**:",
+                        evaluation.completed_items.map(i => `- [x] ${i}`).join('\n'),
+                        "",
+                        "此 Issue 为子任务，验收通过后自动关闭以触发依赖链中的下一个任务。",
+                        "",
+                        "---",
+                        "> 🔍 由 Vibe Continuous 自动验收"
+                      ].join("\n")
+                    });
 
-                  console.log(`  🎉 Issue #${issue.number} 验收通过，等待用户最终确认`);
+                    // 自动关闭 sub-issue
+                    await github.rest.issues.update({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      state: 'closed'
+                    });
+
+                    console.log(`  🎉 Sub-Issue #${issue.number} 验收通过，已自动关闭`);
+
+                  } else {
+                    // 非 sub-issue 需要用户手动确认
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      body: [
+                        "## ✅ 验收通过",
+                        "",
+                        `**完成度**: ${evaluation.completion_percentage}%`,
+                        "",
+                        "**已完成项目**:",
+                        evaluation.completed_items.map(i => `- [x] ${i}`).join('\n'),
+                        "",
+                        "所有验收标准已满足，请确认后关闭此 Issue。",
+                        "",
+                        "---",
+                        "> 🔍 由 Vibe Continuous 自动验收"
+                      ].join("\n")
+                    });
+
+                    // 添加等待确认标签
+                    await github.rest.issues.addLabels({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      labels: ['📋 pending-confirmation']
+                    });
+
+                    console.log(`  🎉 Issue #${issue.number} 验收通过，等待用户最终确认`);
+                  }
                 }
 
               } else if (evaluation.should_continue && (mode === 'scan' || mode === 'continue')) {

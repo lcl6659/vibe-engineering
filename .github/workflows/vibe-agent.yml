@@ -7,15 +7,17 @@ name: Vibe Agent
 #
 # 命令格式:
 #   /agent ui              - 生成 UI 设计规格
+#   /agent spec            - 生成完整技术规格（UI + API + 数据模型 + 验收标准）
 #   /agent be              - 生成后端代码
 #   /agent fe              - 生成前端代码
 #   /agent be --spec #123  - 指定 UI Spec 来源
 #
 # 兼容旧命令:
-#   /agent-ui, /agent-be, /agent-fe
+#   /agent-ui, /agent-spec, /agent-be, /agent-fe
 #
 # 输出策略:
 #   - UI Spec → docs/specs/issue-{number}-ui.md + PR
+#   - Tech Spec → docs/specs/issue-{number}-spec.md + PR
 #   - 后端代码 → PR
 #   - 前端代码 → PR
 #   - 不再在 Issue 评论中输出长内容，避免折叠问题
@@ -51,10 +53,10 @@ jobs:
 
             // 命令匹配规则（优先级从高到低）
             const patterns = [
-              // 新命令格式: /agent ui, /agent be, /agent fe
-              { regex: /\/agent\s+(ui|be|fe)(?:\s+|$)/i, group: 1 },
-              // 旧命令格式兼容: /agent-ui, /agent-be, /agent-fe
-              { regex: /\/agent-(ui|be|fe)(?:\s+|$)/i, group: 1 },
+              // 新命令格式: /agent ui, /agent spec, /agent be, /agent fe
+              { regex: /\/agent\s+(ui|spec|be|fe)(?:\s+|$)/i, group: 1 },
+              // 旧命令格式兼容: /agent-ui, /agent-spec, /agent-be, /agent-fe
+              { regex: /\/agent-(ui|spec|be|fe)(?:\s+|$)/i, group: 1 },
               // 带空格的旧格式: /agent ui (without dash)
               { regex: /\/agent\s+ui(?:\s+|$)/i, type: 'ui' },
             ];
@@ -373,7 +375,293 @@ jobs:
             });
 
   # ============================================================
-  # Job 3: Backend Agent - 生成后端代码
+  # Job 3: Tech Spec Agent - 生成完整技术规格
+  # ============================================================
+  agent-spec:
+    needs: parse-command
+    if: needs.parse-command.outputs.should_run == 'true' && needs.parse-command.outputs.agent_type == 'spec'
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config user.name "vibe-agent[bot]"
+          git config user.email "vibe-agent@github-actions.bot"
+
+      - name: Load PM Compiler Prompt
+        id: pm_prompt
+        uses: ./.github/actions/load-prompt
+        with:
+          template: agents/vibe/pm-compiler.md
+          variables: |
+            {
+              "title": ${{ toJson(github.event.issue.title) }},
+              "body": ${{ toJson(github.event.issue.body) }},
+              "user_instructions": ${{ toJson(needs.parse-command.outputs.user_instructions) }}
+            }
+
+      - name: Load Tech Spec Prompt
+        id: spec_prompt
+        uses: ./.github/actions/load-prompt
+        with:
+          template: agents/vibe/tech-spec.md
+          variables: '{}'
+
+      - name: Generate Tech Spec
+        id: generate
+        uses: actions/github-script@v7
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          USER_INSTRUCTIONS: ${{ needs.parse-command.outputs.user_instructions }}
+          PM_PROMPT: ${{ steps.pm_prompt.outputs.prompt }}
+          SPEC_PROMPT_TEMPLATE: ${{ steps.spec_prompt.outputs.prompt }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const issue = context.payload.issue;
+            const issueNumber = issue.number;
+            const userInstructions = process.env.USER_INSTRUCTIONS || '';
+
+            console.log('='.repeat(60));
+            console.log('📋 TECH SPEC AGENT - 生成完整技术规格');
+            console.log('='.repeat(60));
+
+            // Step 1: PM Compiler - 将 PRD 转换为清晰的产品需求规格
+            console.log('\n📝 Step 1: PM Compiler...');
+            console.log('📄 使用模板: agents/vibe/pm-compiler.md');
+
+            const pmPrompt = process.env.PM_PROMPT;
+
+            const pmRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                model: 'google/gemini-2.0-flash-001',
+                messages: [{ role: 'user', content: pmPrompt }],
+                temperature: 0.3
+              })
+            });
+
+            if (!pmRes.ok) {
+              throw new Error(`PM Compiler 失败: ${pmRes.status}`);
+            }
+
+            const pmData = await pmRes.json();
+            let pmResult = pmData.choices?.[0]?.message?.content || '';
+
+            // 提取 JSON
+            const jsonMatch = pmResult.match(/```(?:json)?\s*([\s\S]*?)```/) ||
+                              pmResult.match(/(\{[\s\S]*\})/);
+            if (jsonMatch) pmResult = jsonMatch[1];
+
+            let compiledRequirement;
+            try {
+              const parsed = JSON.parse(pmResult);
+              compiledRequirement = [
+                '## 产品目标',
+                parsed.product_goal || '未定义',
+                '',
+                '## 核心用户动作',
+                (parsed.user_actions || []).map((a, i) => `${i + 1}. ${a}`).join('\n'),
+                '',
+                '## 输入规则',
+                (parsed.input_rules || []).map(r => `- ${r}`).join('\n'),
+                '',
+                '## 输出规则',
+                (parsed.output_rules || []).map(r => `- ${r}`).join('\n'),
+                '',
+                '## 禁止行为',
+                (parsed.forbidden_actions || []).map(f => `- ${f}`).join('\n'),
+                '',
+                '## 异常与边界',
+                (parsed.edge_cases || []).map(e => `- ${e}`).join('\n')
+              ].join('\n');
+            } catch (e) {
+              console.log('⚠️ JSON 解析失败，使用原始内容');
+              compiledRequirement = pmResult;
+            }
+
+            console.log('✅ PM Compiler 完成');
+
+            // Step 2: Tech Spec Generator - 使用更强的模型生成完整规格
+            console.log('\n📋 Step 2: Tech Spec Generator...');
+            console.log('📄 使用模板: agents/vibe/tech-spec.md');
+
+            // 将 compiledRequirement 注入到 Tech Spec 模板中
+            let specPrompt = process.env.SPEC_PROMPT_TEMPLATE
+              .replace('{{compiled_requirement}}', compiledRequirement)
+              .replace(/\{\{#if user_instructions\}\}[\s\S]*?\{\{\/if\}\}/g,
+                userInstructions ? `## 用户额外指令\n${userInstructions}` : '');
+
+            // 使用 Claude 生成更高质量的技术规格
+            const specRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                model: 'anthropic/claude-sonnet-4',
+                messages: [{ role: 'user', content: specPrompt }],
+                temperature: 0.5,
+                max_tokens: 8000
+              })
+            });
+
+            if (!specRes.ok) {
+              throw new Error(`Tech Spec Generator 失败: ${specRes.status}`);
+            }
+
+            const specData = await specRes.json();
+            const techSpec = specData.choices?.[0]?.message?.content || '';
+
+            console.log('✅ Tech Spec 生成完成');
+
+            // Step 3: 写入文件
+            const specDir = process.env.SPEC_DIR || 'docs/specs';
+            const specFileName = `issue-${issueNumber}-spec.md`;
+            const specFilePath = path.join(specDir, specFileName);
+
+            // 确保目录存在
+            fs.mkdirSync(specDir, { recursive: true });
+
+            const fileContent = [
+              `# Tech Spec for Issue #${issueNumber}`,
+              '',
+              `> 原始需求: [#${issueNumber}](https://github.com/${context.repo.owner}/${context.repo.repo}/issues/${issueNumber})`,
+              `> 生成时间: ${new Date().toISOString()}`,
+              '',
+              '---',
+              '',
+              techSpec,
+              '',
+              '---',
+              '',
+              '## 下一步',
+              '',
+              '使用以下命令生成代码：',
+              '```',
+              `/agent be --spec #${issueNumber}  # 生成后端代码`,
+              `/agent fe --spec #${issueNumber}  # 生成前端代码`,
+              '```',
+              '',
+              '<!-- vibe-tech-spec -->'
+            ].join('\n');
+
+            fs.writeFileSync(specFilePath, fileContent);
+            console.log(`✅ 写入文件: ${specFilePath}`);
+
+            core.setOutput('spec_file', specFilePath);
+            core.setOutput('spec_content', fileContent);
+
+      - name: Create PR with Tech Spec
+        uses: actions/github-script@v7
+        env:
+          SPEC_FILE: ${{ steps.generate.outputs.spec_file }}
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const issue = context.payload.issue;
+            const issueNumber = issue.number;
+            const specFile = process.env.SPEC_FILE;
+
+            const branchName = `tech-spec/issue-${issueNumber}`;
+
+            // 创建分支并提交
+            try {
+              execSync(`git checkout -b ${branchName}`);
+              execSync(`git add ${specFile}`);
+              execSync(`git commit -m "docs: add tech spec for issue #${issueNumber}"`);
+              execSync(`git push origin ${branchName}`);
+            } catch (e) {
+              console.error('Git 操作失败:', e.message);
+              throw e;
+            }
+
+            // 创建 PR
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Tech Spec] ${issue.title}`,
+              head: branchName,
+              base: 'main',
+              body: [
+                `## 📋 完整技术规格`,
+                '',
+                `关联 Issue: #${issueNumber}`,
+                '',
+                `### 文件`,
+                `- \`${specFile}\``,
+                '',
+                '### 包含内容',
+                '- 📋 需求描述',
+                '- 🎨 用户体验流程',
+                '- 🔌 后端 API 设计',
+                '- 📁 数据模型',
+                '- 🖥 前端实现指南',
+                '- ✅ 验收标准 Checklist',
+                '',
+                '### 下一步',
+                '1. Review 并 Merge 此 PR',
+                '2. 在原 Issue 中执行：',
+                '   ```',
+                `   /agent be --spec #${issueNumber}`,
+                `   /agent fe --spec #${issueNumber}`,
+                '   ```',
+                '',
+                '---',
+                '🤖 Generated by Vibe Agent'
+              ].join('\n')
+            });
+
+            // 在 Issue 中添加简短评论
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: [
+                '✅ **技术规格已生成**',
+                '',
+                `📄 PR: #${pr.number}`,
+                `📁 文件: \`${specFile}\``,
+                '',
+                '**包含内容：**',
+                '- 需求描述 + 用户体验流程',
+                '- 后端 API + 数据模型',
+                '- 前端实现指南',
+                '- 验收标准 Checklist',
+                '',
+                '**下一步：**',
+                '1. Review 并 Merge PR',
+                '2. 执行 `/agent be` 或 `/agent fe` 生成代码'
+              ].join('\n')
+            });
+
+            // 更新标签
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['tech-spec-ready']
+            });
+
+  # ============================================================
+  # Job 4: Backend Agent - 生成后端代码
   # ============================================================
   agent-be:
     needs: parse-command
@@ -613,7 +901,7 @@ jobs:
             });
 
   # ============================================================
-  # Job 4: Frontend Agent - 生成前端代码
+  # Job 5: Frontend Agent - 生成前端代码
   # ============================================================
   agent-fe:
     needs: parse-command

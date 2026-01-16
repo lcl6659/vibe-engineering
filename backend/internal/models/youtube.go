@@ -135,9 +135,6 @@ type OAuthCallbackResponse struct {
 	TokenJSON    string    `json:"tokenJSON"`
 }
 
-// ErrorCode represents API error codes.
-type ErrorCode string
-
 const (
 	ErrorInvalidInput     ErrorCode = "INVALID_INPUT"
 	ErrorVideoNotFound    ErrorCode = "VIDEO_NOT_FOUND"
@@ -148,9 +145,3 @@ const (
 	ErrorAuthConfig       ErrorCode = "AUTH_CONFIG_ERROR"
 	ErrorAuthFailed       ErrorCode = "AUTH_FAILED"
 )
-
-// ErrorResponse represents an API error response.
-type ErrorResponse struct {
-	Code    ErrorCode `json:"code"`
-	Message string    `json:"message"`
-}

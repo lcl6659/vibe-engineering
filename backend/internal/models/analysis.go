@@ -6,6 +6,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// ErrorCode represents API error codes.
+type ErrorCode string
+
 // Analysis represents a generic analysis record.
 // This model is used for demonstrating proper error handling patterns.
 type Analysis struct {
@@ -29,7 +32,7 @@ type AnalysisResponse struct {
 
 // ErrorResponse represents a standard error response.
 type ErrorResponse struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	RequestID string `json:"request_id"`
+	Code      ErrorCode `json:"code"`
+	Message   string    `json:"message"`
+	RequestID string    `json:"request_id,omitempty"`
 }

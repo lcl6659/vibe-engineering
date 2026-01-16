@@ -4,9 +4,9 @@
 
 基于 UI Spec 实现前端页面和组件。
 
-## UI Spec
+## 需求
 
-{{ui_spec}}
+{{requirement}}
 
 {{#if user_instructions}}
 ## 用户要求

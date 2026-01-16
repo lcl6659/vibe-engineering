@@ -496,7 +496,7 @@ jobs:
 
             // 将变量注入到模板中
             let contractPrompt = process.env.BE_CONTRACT_PROMPT
-              .replace('{{ui_spec}}', uiSpec.substring(0, 8000))
+              .replace('{{requirement}}', uiSpec.substring(0, 8000))
               .replace('{{user_instructions}}', userInstructions)
               .replace(/\{\{#if user_instructions\}\}[\s\S]*?\{\{\/if\}\}/g, userInstructions ? `用户要求: ${userInstructions}` : '');
 
@@ -758,7 +758,7 @@ jobs:
             console.log('📄 使用模板: agents/vibe/fe-codegen.md');
 
             const prompt = process.env.FE_CODEGEN_PROMPT
-              .replace('{{ui_spec}}', uiSpec.substring(0, 10000))
+              .replace('{{requirement}}', uiSpec.substring(0, 10000))
               .replace('{{user_instructions}}', userInstructions)
               .replace('{{project_context}}', projectContextText || '无现有代码参考')
               .replace(/\{\{#if user_instructions\}\}[\s\S]*?\{\{\/if\}\}/g, userInstructions ? `## 用户要求\n\n${userInstructions}` : '');

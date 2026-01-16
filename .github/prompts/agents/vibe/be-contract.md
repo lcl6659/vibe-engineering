@@ -4,9 +4,9 @@
 用户要求: {{user_instructions}}
 {{/if}}
 
-## UI Spec
+## 需求
 
-{{ui_spec}}
+{{requirement}}
 
 ## 输出格式
 

@@ -400,6 +400,7 @@ jobs:
                   title: task.title,
                   type: task.type,
                   priority: task.priority,
+                  estimated_hours: task.estimated_hours || 4,
                   depends_on: task.depends_on || []
                 });
 
@@ -539,13 +540,41 @@ jobs:
               // 自动触发第一个无依赖的子任务
               const firstTask = createdIssues.find(iss => !iss.depends_on || iss.depends_on.length === 0);
               if (firstTask) {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: firstTask.number,
-                  body: `/agent-medium\n\n---\n\n🤖 **自动触发开发**\n\n此任务无前置依赖，自动开始开发。`
-                });
-                console.log(`🚀 自动触发子任务 #${firstTask.number}`);
+                // 根据预估工时选择 agent 类型
+                const agentWorkflow = firstTask.estimated_hours <= 2 ? 'agent-simple.yml' : 'agent-medium.yml';
+                const agentType = firstTask.estimated_hours <= 2 ? 'Simple' : 'Medium';
+
+                try {
+                  // 使用 workflow_dispatch 直接触发，而不是发评论（bot 评论不会触发 workflow）
+                  await github.rest.actions.createWorkflowDispatch({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    workflow_id: agentWorkflow,
+                    ref: 'main',
+                    inputs: {
+                      issue_number: String(firstTask.number)
+                    }
+                  });
+
+                  // 发评论通知
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: firstTask.number,
+                    body: `🤖 **${agentType} Agent 已自动触发**\n\n此任务无前置依赖，已通过 workflow_dispatch 自动启动开发。\n\n> 📊 可通过 [Actions](/${context.repo.owner}/${context.repo.repo}/actions) 查看执行状态`
+                  });
+
+                  console.log(`🚀 通过 workflow_dispatch 触发子任务 #${firstTask.number} (${agentWorkflow})`);
+                } catch (dispatchError) {
+                  console.error(`❌ 触发子任务失败: ${dispatchError.message}`);
+                  // 发评论提示手动触发
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: firstTask.number,
+                    body: `⚠️ **自动触发失败**\n\n无法自动启动 Agent: ${dispatchError.message}\n\n请手动使用 \`/agent-medium\` 或 \`/agent-simple\` 命令触发。`
+                  });
+                }
               }
 
             } catch (error) {

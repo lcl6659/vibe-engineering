@@ -189,6 +189,14 @@ jobs:
             const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
             const progressCommentId = '${{ steps.update_issue_status.outputs.progress_comment_id }}' || null;
             
+            // 进度条生成函数
+            function generateProgressBar(percentage) {
+              const totalBlocks = 20;
+              const filledBlocks = Math.round((percentage / 100) * totalBlocks);
+              const emptyBlocks = totalBlocks - filledBlocks;
+              return '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks) + ` ${percentage}%`;
+            }
+
             if (progressCommentId) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -204,7 +212,7 @@ jobs:
                   "**当前阶段**: 📝 加载模板和准备提示词...",
                   "",
                   "```",
-                  "██░░░░░░░░░░░░░░░░░░ 10%",
+                  generateProgressBar(10),
                   "```",
                   "",
                   "**状态**: ⏳ 正在加载开发模板...",
@@ -238,6 +246,14 @@ jobs:
             const issueNumber = ${{ steps.issue_info.outputs.issue_number }};
             const progressCommentId = '${{ steps.update_issue_status.outputs.progress_comment_id }}' || null;
             
+            // 进度条生成函数
+            function generateProgressBar(percentage) {
+              const totalBlocks = 20;
+              const filledBlocks = Math.round((percentage / 100) * totalBlocks);
+              const emptyBlocks = totalBlocks - filledBlocks;
+              return '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks) + ` ${percentage}%`;
+            }
+
             if (progressCommentId) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -253,7 +269,7 @@ jobs:
                   "**当前阶段**: 🤖 AI 正在开发...",
                   "",
                   "```",
-                  "████████░░░░░░░░░░░░ 40%",
+                  generateProgressBar(50),
                   "```",
                   "",
                   "**状态**: ⏳ Claude 正在处理任务...",
@@ -387,7 +403,18 @@ jobs:
             if (!relatedPR) {
               console.log(`❌ 未找到关联 PR，不关闭 Issue #${issueNumber}`);
 
-              // 更新进度评论为警告状态
+              // 进度条生成函数
+              function generateProgressBar(percentage) {
+                const totalBlocks = 20;
+                const filledBlocks = Math.round((percentage / 100) * totalBlocks);
+                const emptyBlocks = totalBlocks - filledBlocks;
+                return '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks) + ` ${percentage}%`;
+              }
+
+              // 构建 claude-code-action 风格的警告状态
+              const jobUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }}`;
+              const statusLine = `**⚠️ Claude finished** — No PR created —— [View job](${jobUrl})`;
+
               if (progressCommentId) {
                 try {
                   await github.rest.issues.updateComment({
@@ -399,26 +426,31 @@ jobs:
                       "",
                       "---",
                       "",
-                      "## ⚠️ 完成但未创建 PR",
-                      "",
-                      "**当前阶段**: ⚠️ 代码未提交",
+                      statusLine,
                       "",
                       "```",
-                      "████████████████░░░░ 80%",
+                      generateProgressBar(80),
                       "```",
                       "",
-                      "**状态**: ⚠️ 代码可能已写入但未创建 PR",
+                      "---",
                       "",
-                      "**问题**: Agent 执行完成，但未检测到关联的 Pull Request。",
+                      "## 🔍 What happened",
                       "",
-                      "**可能原因**:",
-                      "- Agent 未执行 git commit/push",
-                      "- Agent 未创建 PR",
-                      "- PR 创建失败",
+                      "Agent completed execution, but no Pull Request was found.",
                       "",
-                      "**建议**: 请检查 Actions 日志，手动创建 PR 或重新触发 Agent。",
+                      "**Possible causes:**",
+                      "- Changes were not committed",
+                      "- PR creation was skipped or failed",
+                      "- Branch was not pushed to remote",
                       "",
-                      `**Actions 日志**: [查看详情](/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})`
+                      "## 🔧 What to do next",
+                      "",
+                      "- Review the job logs to see what Claude did",
+                      "- Check if there are local changes that need to be committed",
+                      "- Manually create a PR or retry the agent",
+                      "",
+                      "---",
+                      "*If you need help, review the execution logs for more details.*"
                     ].join("\n")
                   });
                 } catch (e) {
@@ -478,24 +510,47 @@ jobs:
             const summarizeChecks = (runs) =>
               runs.map(r => `- ${r.name}: ${r.conclusion || r.status}`).join('\n');
 
+            // 进度条生成函数
+            function generateProgressBar(percentage) {
+              const totalBlocks = 20;
+              const filledBlocks = Math.round((percentage / 100) * totalBlocks);
+              const emptyBlocks = totalBlocks - filledBlocks;
+              return '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks) + ` ${percentage}%`;
+            }
+
             if (failedChecks.length > 0) {
               console.log(`❌ 检测到 ${failedChecks.length} 个失败的检查`);
 
+              // 构建 claude-code-action 风格的 CI 失败状态
+              const jobUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }}`;
+              const prUrl = relatedPR ? relatedPR.html_url : '';
+              const statusParts = [`**🔨 CI checks failed** —— [View job](${jobUrl})`];
+              if (prUrl) {
+                statusParts.push(`[PR #${relatedPR.number}](${prUrl})`);
+              }
+              const statusLine = statusParts.join(' • ');
+
               const ciFailureSection = [
-                "## ❌ Simple Agent - CI 失败",
-                "",
-                "**当前阶段**: ❌ CI 检查未通过",
+                statusLine,
                 "",
                 "```",
-                "██████████████░░░░░░ 70%",
+                generateProgressBar(75),
                 "```",
                 "",
-                "**失败检查**:",
+                "---",
+                "",
+                "## ❌ Failed checks",
+                "",
                 summarizeChecks(failedChecks),
                 "",
-                `**Actions 日志**: [查看详情](/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})`,
+                "## 🔧 What to do next",
                 "",
-                "已自动触发修复流程（如适用）。"
+                "- Auto-fix has been triggered (if applicable)",
+                "- Review the PR checks for detailed error messages",
+                "- Manual fixes may be required for some issues",
+                "",
+                "---",
+                "*The `/fix` command will attempt to resolve common CI failures automatically.*"
               ].join("\n");
 
               if (progressCommentId) {
@@ -567,19 +622,38 @@ jobs:
             if (pendingChecks.length > 0) {
               console.log(`⏳ 仍有 ${pendingChecks.length} 个检查未完成`);
 
+              // 进度条生成函数
+              function generateProgressBar(percentage) {
+                const totalBlocks = 20;
+                const filledBlocks = Math.round((percentage / 100) * totalBlocks);
+                const emptyBlocks = totalBlocks - filledBlocks;
+                return '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks) + ` ${percentage}%`;
+              }
+
+              // 构建 claude-code-action 风格的 CI 进行中状态
+              const jobUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }}`;
+              const prUrl = relatedPR ? relatedPR.html_url : '';
+              const statusParts = [`**⏳ CI checks running** —— [View job](${jobUrl})`];
+              if (prUrl) {
+                statusParts.push(`[PR #${relatedPR.number}](${prUrl})`);
+              }
+              const statusLine = statusParts.join(' • ');
+
               const ciPendingSection = [
-                "## ⏳ Simple Agent - CI 进行中",
-                "",
-                "**当前阶段**: ⏳ 等待 CI 完成",
+                statusLine,
                 "",
                 "```",
-                "██████████████░░░░░░ 70%",
+                generateProgressBar(75),
                 "```",
                 "",
-                "**未完成检查**:",
+                "---",
+                "",
+                "## ⏳ Pending checks",
+                "",
                 summarizeChecks(pendingChecks),
                 "",
-                `**Actions 日志**: [查看详情](/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})`
+                "---",
+                "*Waiting for all CI checks to complete...*"
               ].join("\n");
 
               if (progressCommentId) {
@@ -629,6 +703,14 @@ jobs:
               return;
             }
 
+            // 进度条生成函数
+            function generateProgressBar(percentage) {
+              const totalBlocks = 20;
+              const filledBlocks = Math.round((percentage / 100) * totalBlocks);
+              const emptyBlocks = totalBlocks - filledBlocks;
+              return '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks) + ` ${percentage}%`;
+            }
+
             // 有 PR 的情况：正常完成流程
             // 更新进度评论为完成状态
             if (progressCommentId) {
@@ -647,7 +729,7 @@ jobs:
                     "**当前阶段**: ✅ 完成",
                     "",
                     "```",
-                    "████████████████████ 100%",
+                    generateProgressBar(100),
                     "```",
                     "",
                     "**状态**: ✅ 任务已完成",
@@ -725,26 +807,58 @@ jobs:
             const progressCommentId = '${{ steps.update_issue_status.outputs.progress_comment_id }}' || null;
             const errorMessage = `${{ steps.check_result.outputs.error_message || '未知错误' }}`;
 
-            // 分析错误类型
-            let errorAnalysis = "";
-            let suggestion = "";
+            // 进度条生成函数
+            function generateProgressBar(percentage) {
+              const totalBlocks = 20;
+              const filledBlocks = Math.round((percentage / 100) * totalBlocks);
+              const emptyBlocks = totalBlocks - filledBlocks;
+              return '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks) + ` ${percentage}%`;
+            }
+
+            // 分析错误类型并给出针对性建议
+            let errorType = "";
+            let errorIcon = "❌";
+            let nextSteps = [];
 
             if (errorMessage.includes("Edit") || errorMessage.includes("old_string") || errorMessage.includes("not found")) {
-              errorAnalysis = "代码编辑失败 - 目标代码块未找到";
-              suggestion = "检查目标文件是否已更新";
+              errorType = "Code edit failed";
+              errorIcon = "🔍";
+              nextSteps = [
+                "The target code may have been modified",
+                "Try reviewing the file manually or use `/agent-simple` to retry"
+              ];
             } else if (errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {
-              errorAnalysis = "执行超时";
-              suggestion = "使用 `/agent-medium` 处理";
+              errorType = "Task timeout";
+              errorIcon = "⏱️";
+              nextSteps = [
+                "Task may be too complex for simple agent",
+                "Use `/agent-medium` for more complex tasks"
+              ];
             } else if (errorMessage.includes("rate limit") || errorMessage.includes("429") || errorMessage.includes("Too Many Requests")) {
-              errorAnalysis = "API 请求限流";
-              suggestion = "等待几分钟后使用 `/agent-simple` 重试";
+              errorType = "API rate limit";
+              errorIcon = "🚦";
+              nextSteps = [
+                "Wait a few minutes and retry with `/agent-simple`"
+              ];
             } else if (errorMessage.includes("build") || errorMessage.includes("compile")) {
-              errorAnalysis = "构建失败";
-              suggestion = "查看日志定位具体错误";
+              errorType = "Build failed";
+              errorIcon = "🔨";
+              nextSteps = [
+                "Code contains syntax or compilation errors",
+                "Review the build logs for specific issues"
+              ];
             } else {
-              errorAnalysis = "执行过程中出现错误";
-              suggestion = "查看 Actions 日志获取详细信息";
+              errorType = "Execution error";
+              errorIcon = "⚠️";
+              nextSteps = [
+                "Review the Actions logs for more details",
+                "Retry with `/agent-simple` or use `/agent-medium`"
+              ];
             }
+
+            // 构建 claude-code-action 风格的失败状态
+            const jobUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const statusLine = `**${errorIcon} Claude failed** — ${errorType} —— [View job](${jobUrl})`;
 
             // 更新进度评论为失败状态
             if (progressCommentId) {
@@ -758,21 +872,28 @@ jobs:
                     "",
                     "---",
                     "",
-                    "## ❌ 执行失败",
+                    statusLine,
                     "",
-                    `**错误类型**: ${errorAnalysis}`,
+                    "```",
+                    generateProgressBar(50),
+                    "```",
                     "",
-                    `**Actions 日志**: [查看详情](/${{ github.repository }}/actions/runs/${{ github.run_id }})`,
+                    "---",
                     "",
-                    `**建议**: ${suggestion}`,
+                    "## 🔧 What to do next",
+                    "",
+                    ...nextSteps.map(step => `- ${step}`),
                     "",
                     "<details>",
-                    "<summary>错误详情</summary>",
+                    "<summary>📋 Error details</summary>",
                     "",
                     "```",
                     errorMessage.substring(0, 500),
                     "```",
-                    "</details>"
+                    "</details>",
+                    "",
+                    "---",
+                    "*For more complex tasks, consider using `/agent-medium` or `/agent-complex`.*"
                   ].join("\n")
                 });
               } catch (e) {

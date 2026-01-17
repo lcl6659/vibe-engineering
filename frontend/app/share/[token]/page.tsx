@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface SharePageProps {
-  params: { token: string };
+  params: Promise<{ token: string }>;
 }
 
 const sourceIcons = {
@@ -41,6 +41,12 @@ export default function SharePage({ params }: SharePageProps) {
   const [requiresPassword, setRequiresPassword] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+
+  // Unwrap params Promise
+  useEffect(() => {
+    params.then((p) => setToken(p.token));
+  }, [params]);
 
   const loadSharedInsight = async (token: string, pwd?: string) => {
     try {
@@ -67,10 +73,10 @@ export default function SharePage({ params }: SharePageProps) {
   };
 
   useEffect(() => {
-    if (params.token) {
-      loadSharedInsight(params.token);
+    if (token) {
+      loadSharedInsight(token);
     }
-  }, [params.token]);
+  }, [token]);
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,8 +85,10 @@ export default function SharePage({ params }: SharePageProps) {
       return;
     }
 
+    if (!token) return;
+
     setPasswordLoading(true);
-    await loadSharedInsight(params.token, password);
+    await loadSharedInsight(token, password);
   };
 
   if (loading) {

@@ -3,17 +3,19 @@ import { insightApi } from "@/lib/api/endpoints";
 
 interface ShareLayoutProps {
   children: React.ReactNode;
-  params: { token: string };
+  params: Promise<{ token: string }>;
 }
 
 export async function generateMetadata({
   params,
 }: {
-  params: { token: string };
+  params: Promise<{ token: string }>;
 }): Promise<Metadata> {
+  const { token } = await params;
+
   try {
     // 尝试获取分享内容用于SEO
-    const insight = await insightApi.getSharedInsight(params.token);
+    const insight = await insightApi.getSharedInsight(token);
 
     const title = `${insight.title} - InsightFlow 分享`;
     const description = insight.content.summary

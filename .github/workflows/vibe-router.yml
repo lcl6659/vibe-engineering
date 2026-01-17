@@ -2,7 +2,7 @@ name: Vibe Router - AI 需求复杂度路由
 
 on:
   issues:
-    types: [opened]
+    types: [opened, labeled]
 
 jobs:
   route:
@@ -16,10 +16,69 @@ jobs:
       reasoning: ${{ steps.analyze.outputs.reasoning }}
 
     steps:
+      - name: Check if should route
+        id: should_route
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const labels = issue.labels?.map(l => l.name) || [];
+            
+            // 如果是 labeled 事件
+            if (context.payload.action === 'labeled') {
+              const addedLabel = context.payload.label?.name;
+              console.log(`📋 检测到标签添加: ${addedLabel}`);
+              
+              // 检查是否已经有复杂度标签（说明已经被路由过）
+              const hasComplexityLabel = labels.some(l => 
+                l.startsWith('complexity:') || 
+                l === 'complexity:simple' || 
+                l === 'complexity:medium' || 
+                l === 'complexity:complex'
+              );
+              
+              // 检查是否已经被AI处理过
+              const hasAILabels = labels.some(l => 
+                l.includes('ai-processing') || 
+                l.includes('ai-completed') || 
+                l.includes('ai-failed') ||
+                l.startsWith('agent:')
+              );
+              
+              if (hasComplexityLabel) {
+                console.log('⏭️ 跳过: 已有复杂度标签，不重复路由');
+                core.setOutput('should_route', 'false');
+                return;
+              }
+              
+              if (hasAILabels) {
+                console.log('⏭️ 跳过: Issue 已被 AI 处理过');
+                core.setOutput('should_route', 'false');
+                return;
+              }
+              
+              // 只有在添加特定触发标签时才路由（例如 "needs-route" 或模块标签）
+              const triggerLabels = ['needs-route', 'backend', 'frontend', 'database'];
+              if (!triggerLabels.includes(addedLabel)) {
+                console.log(`⏭️ 跳过: 标签 ${addedLabel} 不是路由触发标签`);
+                core.setOutput('should_route', 'false');
+                return;
+              }
+              
+              console.log('✅ 满足路由条件，将触发路由分析');
+              core.setOutput('should_route', 'true');
+            } else {
+              // opened 事件，直接路由
+              console.log('✅ 新 Issue 创建，将触发路由分析');
+              core.setOutput('should_route', 'true');
+            }
+
       - name: Checkout repository
+        if: steps.should_route.outputs.should_route == 'true'
         uses: actions/checkout@v4
 
       - name: Load Prompt Template
+        if: steps.should_route.outputs.should_route == 'true'
         id: prompt
         uses: ./.github/actions/load-prompt
         with:
@@ -31,6 +90,7 @@ jobs:
             }
 
       - name: Analyze Issue Complexity
+        if: steps.should_route.outputs.should_route == 'true'
         id: analyze
         uses: actions/github-script@v7
         env:
@@ -49,7 +109,9 @@ jobs:
   # 触发对应的 Agent (使用 workflow_dispatch 替代 workflow_call，以正确传递 Issue 信息)
   trigger-simple:
     needs: route
-    if: needs.route.outputs.complexity == 'S'
+    if: |
+      needs.route.outputs.complexity == 'S' &&
+      needs.route.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -71,7 +133,9 @@ jobs:
 
   trigger-medium:
     needs: route
-    if: needs.route.outputs.complexity == 'M'
+    if: |
+      needs.route.outputs.complexity == 'M' &&
+      needs.route.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -93,7 +157,9 @@ jobs:
 
   trigger-complex:
     needs: route
-    if: needs.route.outputs.complexity == 'L'
+    if: |
+      needs.route.outputs.complexity == 'L' &&
+      needs.route.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       actions: write

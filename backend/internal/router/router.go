@@ -70,6 +70,11 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 	transcriptService := services.NewTranscriptService(log)
 	transcriptHandler := handlers.NewTranscriptHandler(transcriptService, log)
 
+	// Translation service and handlers
+	translationRepo := repository.NewTranslationRepository(db.DB)
+	translationService := services.NewTranslationService(cfg.OpenRouterAPIKey, cfg.GeminiModel, log)
+	translationHandler := handlers.NewTranslationHandler(translationRepo, translationService, transcriptService, log)
+
 	// Chat handlers
 	chatRepo := repository.NewChatRepository(db.DB)
 	chatService := services.NewChatService(chatRepo, videoRepo, insightRepo, cfg.OpenRouterAPIKey, cfg.GeminiModel, log)
@@ -80,6 +85,10 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 	{
 		// Parse routes
 		api.POST("/parse", parseHandler.Parse)
+
+		// Translation routes
+		api.POST("/translate", translationHandler.Translate)
+		api.GET("/translate/:id", translationHandler.GetTranslation)
 
 		// Analysis routes
 		analysis := api.Group("/analysis")

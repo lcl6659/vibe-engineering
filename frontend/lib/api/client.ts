@@ -99,13 +99,9 @@ function buildHeaders(customHeaders?: Record<string, string>): HeadersInit {
     ...customHeaders,
   });
 
-  // 优先使用 Google OAuth token，如果不存在则使用通用 auth token
+  // 优先使用系统 auth token（用于后端 API 认证）
   // 只在浏览器环境中访问 localStorage
-  const googleAccessToken =
-    typeof window !== "undefined"
-      ? localStorage.getItem("google_access_token")
-      : null;
-  const token = googleAccessToken || getAuthToken();
+  const token = getAuthToken();
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
@@ -121,10 +117,18 @@ async function handleResponse<T>(response: Response): Promise<T> {
   const isJson = contentType?.includes("application/json");
 
   let data: unknown;
-  if (isJson) {
-    data = await response.json();
-  } else {
-    data = await response.text();
+  try {
+    if (isJson) {
+      // 尝试解析 JSON，如果响应体为空则返回空对象
+      const text = await response.text();
+      data = text ? JSON.parse(text) : {};
+    } else {
+      data = await response.text();
+    }
+  } catch (e) {
+    // JSON 解析失败，返回原始文本
+    const text = await response.text().catch(() => "");
+    data = text || {};
   }
 
   if (!response.ok) {
@@ -139,6 +143,21 @@ async function handleResponse<T>(response: Response): Promise<T> {
         errorMessage = errorData.error;
       }
     }
+    
+    // Handle 401 Unauthorized - redirect to login
+    if (response.status === 401 && typeof window !== "undefined") {
+      const currentPath = window.location.pathname + window.location.search;
+      // Only redirect if not already on auth pages
+      if (currentPath !== "/auth" && currentPath !== "/auth/google/callback") {
+        // Save current URL to return after login
+        sessionStorage.setItem("auth_return_url", currentPath);
+        // Use setTimeout to allow React to clean up before redirect
+        setTimeout(() => {
+          window.location.href = "/auth";
+        }, 100);
+      }
+    }
+    
     throw new ApiError(
       response.status,
       response.statusText,

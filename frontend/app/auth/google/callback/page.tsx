@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api/client";
 import { toast } from "@/lib/utils/toast";
 
@@ -44,27 +45,43 @@ export default function GoogleCallbackPage() {
           tokenType: string;
           expiry: string;
           tokenJSON: string;
+          user?: {
+            id: number;
+            email: string;
+            name: string;
+            created_at: string;
+          };
+          apiKey?: string;
         }>('/v1/auth/google/callback', {
           code,
           state: searchParams.get('state'),
         });
 
-        // Store token in localStorage
+        // Clear any old auth data first to avoid format conflicts
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_info');
+        localStorage.removeItem('google_oauth_token');
+        localStorage.removeItem('google_access_token');
+        localStorage.removeItem('google_refresh_token');
+        localStorage.removeItem('google_token_expiry');
+
+        // Store Google OAuth token (for YouTube API access)
         localStorage.setItem('google_oauth_token', response.tokenJSON);
         localStorage.setItem('google_access_token', response.accessToken);
         localStorage.setItem('google_refresh_token', response.refreshToken);
         localStorage.setItem('google_token_expiry', response.expiry);
 
-        setStatus('success');
-        setMessage('Authorization successful! Redirecting...');
-        toast.success('Successfully authorized with Google');
+        // Store system API key and user info (for backend API authentication)
+        if (response.apiKey) {
+          localStorage.setItem('auth_token', response.apiKey);
+        }
+        if (response.user) {
+          localStorage.setItem('user_info', JSON.stringify(response.user));
+        }
 
-        // Redirect to home or previous page after 2 seconds
-        setTimeout(() => {
-          const returnUrl = sessionStorage.getItem('auth_return_url') || '/';
-          sessionStorage.removeItem('auth_return_url');
-          router.push(returnUrl);
-        }, 2000);
+        setStatus('success');
+        setMessage('Authorization successful!');
+        toast.success('Successfully logged in with Google');
 
       } catch (error) {
         console.error('OAuth callback error:', error);
@@ -77,6 +94,13 @@ export default function GoogleCallbackPage() {
 
     handleCallback();
   }, [searchParams, router]);
+
+  const handleContinue = () => {
+    const returnUrl = sessionStorage.getItem('auth_return_url') || '/insights';
+    sessionStorage.removeItem('auth_return_url');
+    // 使用完整页面重新加载以避免模块加载问题
+    window.location.href = returnUrl;
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f9f9f9]">
@@ -105,7 +129,28 @@ export default function GoogleCallbackPage() {
           {status === 'error' && 'Authorization Failed'}
         </h1>
 
-        <p className="text-muted-foreground">{message}</p>
+        <p className="text-muted-foreground mb-6">{message}</p>
+
+        {status === 'success' && (
+          <Button
+            size="lg"
+            onClick={handleContinue}
+            className="rounded-xl"
+          >
+            Continue to App
+          </Button>
+        )}
+
+        {status === 'error' && (
+          <Button
+            size="lg"
+            variant="outline"
+            onClick={() => window.location.href = '/auth'}
+            className="rounded-xl"
+          >
+            Try Again
+          </Button>
+        )}
       </div>
     </div>
   );

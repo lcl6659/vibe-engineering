@@ -7,10 +7,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 	"vibe-backend/internal/models"
 	"vibe-backend/internal/services"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // ChatHandler handles chat-related HTTP requests.
@@ -176,8 +177,10 @@ func (h *ChatHandler) AnalyzeEntities(c *gin.Context) {
 
 	result, err := h.chatService.AnalyzeEntities(c.Request.Context(), uint(id))
 	if err != nil {
-		// Check if it's a "not found" error
-		if strings.Contains(err.Error(), "not found") {
+		errMsg := err.Error()
+		
+		// Check if it's a "insight not found" error (more precise check)
+		if strings.Contains(errMsg, "insight not found") || strings.Contains(errMsg, "record not found") {
 			h.log.Error("Insight not found",
 				zap.String("error_code", "INSIGHT_NOT_FOUND"),
 				zap.Uint64("insight_id", id),
@@ -186,6 +189,22 @@ func (h *ChatHandler) AnalyzeEntities(c *gin.Context) {
 			c.JSON(http.StatusNotFound, models.ErrorResponse{
 				Code:      "INSIGHT_NOT_FOUND",
 				Message:   "Insight not found.",
+				RequestID: requestID,
+			})
+			return
+		}
+		
+		// Check if it's an OpenRouter API authentication error
+		if strings.Contains(errMsg, "OpenRouter API 认证失败") || strings.Contains(errMsg, "User not found") {
+			h.log.Error("OpenRouter API authentication failed",
+				zap.String("error_code", "OPENROUTER_AUTH_FAILED"),
+				zap.Uint64("insight_id", id),
+				zap.String("request_id", requestID),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{
+				Code:      "OPENROUTER_AUTH_FAILED",
+				Message:   "AI service authentication failed. Please contact administrator.",
 				RequestID: requestID,
 			})
 			return

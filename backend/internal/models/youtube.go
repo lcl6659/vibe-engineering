@@ -128,11 +128,13 @@ type OAuthCallbackRequest struct {
 
 // OAuthCallbackResponse represents the OAuth callback response.
 type OAuthCallbackResponse struct {
-	AccessToken  string    `json:"accessToken"`
-	RefreshToken string    `json:"refreshToken"`
-	TokenType    string    `json:"tokenType"`
-	Expiry       time.Time `json:"expiry"`
-	TokenJSON    string    `json:"tokenJSON"`
+	AccessToken  string        `json:"accessToken"`
+	RefreshToken string        `json:"refreshToken"`
+	TokenType    string        `json:"tokenType"`
+	Expiry       time.Time     `json:"expiry"`
+	TokenJSON    string        `json:"tokenJSON"`
+	User         *UserResponse `json:"user,omitempty"`  // System user info
+	APIKey       string        `json:"apiKey,omitempty"` // System API key for authentication
 }
 
 const (

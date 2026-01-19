@@ -120,18 +120,31 @@ func (p *InsightProcessor) processYouTubeInsight(ctx context.Context, insight *m
 
 	insight.SourceID = videoID
 
-	// Fetch video metadata
-	metadata, err := p.youtubeService.GetVideoMetadataFromAPI(ctx, videoID)
+	// Fetch video metadata with multiple fallback methods
+	var metadata *VideoMetadata
+	
+	// Method 1: Try YouTube Data API v3 (fastest if configured)
+	metadata, err = p.youtubeService.GetVideoMetadataFromAPI(ctx, videoID)
 	if err != nil {
-		p.log.Warn("Failed to get video metadata from API, trying alternative method",
+		p.log.Warn("Failed to get video metadata from YouTube API, trying yt-dlp",
 			zap.String("video_id", videoID),
 			zap.Error(err),
 		)
-		// Try alternative method using Gemini
-		metadata, err = p.youtubeService.GetVideoMetadata(ctx, insight.SourceURL)
+		
+		// Method 2: Try yt-dlp (most reliable, no API key needed)
+		metadata, err = p.youtubeService.GetVideoMetadataWithYtDlp(ctx, videoID)
 		if err != nil {
-			p.handleProcessingError(ctx, insight.ID, fmt.Sprintf("无法获取视频元数据: %v", err))
-			return
+			p.log.Warn("Failed to get video metadata from yt-dlp, trying AI method",
+				zap.String("video_id", videoID),
+				zap.Error(err),
+			)
+			
+			// Method 3: Try Gemini/OpenRouter (last resort, requires valid API key)
+			metadata, err = p.youtubeService.GetVideoMetadata(ctx, insight.SourceURL)
+			if err != nil {
+				p.handleProcessingError(ctx, insight.ID, fmt.Sprintf("无法获取视频元数据: 所有方法都失败了。YouTube API: 未配置或失败, yt-dlp: %v, OpenRouter API: %v", err, err))
+				return
+			}
 		}
 	}
 
@@ -233,7 +246,7 @@ func (p *InsightProcessor) convertTranscriptsToInsightFormat(response *models.Yo
 
 	// Translate transcripts if translation service is available and target language is set
 	if p.translationService != nil && targetLang != "" {
-		p.log.Info("Translating transcripts",
+		p.log.Info("Attempting to translate transcripts",
 			zap.Int("count", len(transcriptItems)),
 			zap.String("target_lang", targetLang),
 		)
@@ -248,26 +261,52 @@ func (p *InsightProcessor) convertTranscriptsToInsightFormat(response *models.Yo
 		var sourceLang string
 		if len(texts) > 0 {
 			detected, err := p.translationService.DetectLanguage(context.Background(), texts[0])
-			if err == nil {
+			if err != nil {
+				p.log.Warn("Failed to detect source language, skipping translation",
+					zap.Error(err),
+				)
+			} else {
 				sourceLang = detected
+				p.log.Info("Detected source language",
+					zap.String("source_lang", sourceLang),
+				)
 			}
 		}
 
-		// Batch translate
-		translations, err := p.translationService.TranslateBatch(context.Background(), texts, sourceLang, targetLang)
-		if err != nil {
-			p.log.Warn("Failed to translate transcripts, continuing without translation",
-				zap.Error(err),
-			)
-		} else {
-			// Add translations to transcript items
-			for i, translation := range translations {
-				if i < len(transcriptItems) {
-					transcriptItems[i].TranslatedText = translation
+		// Only attempt translation if we detected the source language
+		if sourceLang != "" && sourceLang != targetLang {
+			// Batch translate
+			translations, err := p.translationService.TranslateBatch(context.Background(), texts, sourceLang, targetLang)
+			if err != nil {
+				p.log.Warn("⚠️  翻译失败，字幕仍包含原文",
+					zap.Error(err),
+					zap.String("原因", "OpenRouter API 可能未配置或密钥无效"),
+					zap.String("影响", "前端将只显示原文字幕，不影响基本功能"),
+				)
+			} else {
+				// Add translations to transcript items
+				for i, translation := range translations {
+					if i < len(transcriptItems) {
+						transcriptItems[i].TranslatedText = translation
+					}
 				}
+				p.log.Info("✅ 成功翻译字幕",
+					zap.Int("翻译数量", len(translations)),
+					zap.String("源语言", sourceLang),
+					zap.String("目标语言", targetLang),
+				)
 			}
-			p.log.Info("Successfully translated transcripts")
+		} else if sourceLang == targetLang {
+			p.log.Info("源语言与目标语言相同，跳过翻译",
+				zap.String("language", sourceLang),
+			)
 		}
+	} else {
+		p.log.Info("ℹ️  翻译服务未配置或目标语言未设置",
+			zap.Bool("has_translation_service", p.translationService != nil),
+			zap.String("target_lang", targetLang),
+			zap.String("说明", "字幕将只包含原文，这不影响基本功能"),
+		)
 	}
 
 	return json.Marshal(transcriptItems)

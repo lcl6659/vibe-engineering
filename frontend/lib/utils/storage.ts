@@ -84,16 +84,29 @@ export function clearStorage(type: StorageType = "localStorage"): void {
 
 /**
  * 设置认证 token
+ * 注意：auth_token 存储为普通字符串，不使用 JSON.stringify
  */
 export function setAuthToken(token: string): void {
-  setStorageItem(STORAGE_KEYS.AUTH_TOKEN, token);
+  try {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
+  } catch (error) {
+    console.error('Failed to set auth token', error);
+  }
 }
 
 /**
  * 获取认证 token
+ * 注意：auth_token 存储的是普通字符串，不是 JSON，所以直接读取
  */
 export function getAuthToken(): string | null {
-  return getStorageItem<string>(STORAGE_KEYS.AUTH_TOKEN);
+  try {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  } catch (error) {
+    console.error('Failed to get auth token', error);
+    return null;
+  }
 }
 
 /**

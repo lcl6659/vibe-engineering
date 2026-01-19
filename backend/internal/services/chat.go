@@ -39,6 +39,21 @@ func NewChatService(
 		chatModel = "anthropic/claude-3-5-sonnet"
 	}
 
+	// Validate API key on service initialization
+	if apiKey == "" {
+		log.Error("⚠️  OpenRouter API 密钥未设置",
+			zap.String("环境变量", "OPENROUTER_API_KEY"),
+			zap.String("影响功能", "聊天、实体分析等AI功能将无法使用"),
+			zap.String("解决方案", "请在 .env 文件中设置 OPENROUTER_API_KEY，访问 https://openrouter.ai/ 获取密钥"),
+		)
+	} else {
+		maskedKey := apiKey[:10] + "..." + apiKey[len(apiKey)-4:]
+		log.Info("✅ OpenRouter API 服务已初始化",
+			zap.String("model", chatModel),
+			zap.String("api_key", maskedKey),
+		)
+	}
+
 	return &ChatService{
 		chatRepo:         chatRepo,
 		videoRepo:        videoRepo,
@@ -290,6 +305,8 @@ func (s *ChatService) streamFromOpenRouter(ctx context.Context, messages []map[s
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+s.openRouterAPIKey)
 	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("HTTP-Referer", "https://github.com/your-repo/vibe-engineering-playbook")
+	req.Header.Set("X-Title", "VIBE Engineering Playbook")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -302,11 +319,26 @@ func (s *ChatService) streamFromOpenRouter(ctx context.Context, messages []map[s
 	if resp.StatusCode != http.StatusOK {
 		var errorBody bytes.Buffer
 		errorBody.ReadFrom(resp.Body)
-		s.log.Error("OpenRouter streaming API error",
-			zap.Int("status_code", resp.StatusCode),
-			zap.String("response_body", errorBody.String()),
-			zap.Uint("insight_id", insightID),
-		)
+		errorBodyStr := errorBody.String()
+		
+		// Special handling for 401 authentication errors
+		if resp.StatusCode == http.StatusUnauthorized {
+			s.log.Error("❌ OpenRouter API 认证失败 - API密钥无效 (流式请求)",
+				zap.Int("status_code", resp.StatusCode),
+				zap.String("response_body", errorBodyStr),
+				zap.String("api_key_prefix", s.maskAPIKey()),
+				zap.Uint("insight_id", insightID),
+				zap.String("error_type", "AUTHENTICATION_FAILED"),
+				zap.String("解决方案", "请检查 OPENROUTER_API_KEY 环境变量，访问 https://openrouter.ai/ 获取有效密钥"),
+			)
+		} else {
+			s.log.Error("OpenRouter streaming API error",
+				zap.Int("status_code", resp.StatusCode),
+				zap.String("response_body", errorBodyStr),
+				zap.Uint("insight_id", insightID),
+			)
+		}
+		
 		responseChan <- models.ChatStreamEvent{Done: true}
 		return
 	}
@@ -406,6 +438,8 @@ func (s *ChatService) callOpenRouter(ctx context.Context, prompt string) (string
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+s.openRouterAPIKey)
+	req.Header.Set("HTTP-Referer", "https://github.com/your-repo/vibe-engineering-playbook")
+	req.Header.Set("X-Title", "VIBE Engineering Playbook")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -417,11 +451,25 @@ func (s *ChatService) callOpenRouter(ctx context.Context, prompt string) (string
 	if resp.StatusCode != http.StatusOK {
 		var errorBody bytes.Buffer
 		errorBody.ReadFrom(resp.Body)
+		errorBodyStr := errorBody.String()
+		
+		// Special handling for 401 authentication errors
+		if resp.StatusCode == http.StatusUnauthorized {
+			s.log.Error("❌ OpenRouter API 认证失败 - API密钥无效",
+				zap.Int("status_code", resp.StatusCode),
+				zap.String("response_body", errorBodyStr),
+				zap.String("api_key_prefix", s.maskAPIKey()),
+				zap.String("error_type", "AUTHENTICATION_FAILED"),
+				zap.String("解决方案", "请检查 OPENROUTER_API_KEY 环境变量，访问 https://openrouter.ai/ 获取有效密钥"),
+			)
+			return "", fmt.Errorf("OpenRouter API 认证失败（401）: %s - 请检查 OPENROUTER_API_KEY 是否有效", errorBodyStr)
+		}
+		
 		s.log.Error("OpenRouter API returned error",
 			zap.Int("status_code", resp.StatusCode),
-			zap.String("response_body", errorBody.String()),
+			zap.String("response_body", errorBodyStr),
 		)
-		return "", fmt.Errorf("OpenRouter API error: status %d, body: %s", resp.StatusCode, errorBody.String())
+		return "", fmt.Errorf("OpenRouter API error: status %d, body: %s", resp.StatusCode, errorBodyStr)
 	}
 
 	var response struct {
@@ -485,4 +533,15 @@ func (s *ChatService) cleanJSONResponse(response string) string {
 	}
 
 	return cleaned
+}
+
+// maskAPIKey returns a masked version of the API key for logging (shows only first 10 chars).
+func (s *ChatService) maskAPIKey() string {
+	if s.openRouterAPIKey == "" {
+		return "<未设置>"
+	}
+	if len(s.openRouterAPIKey) <= 10 {
+		return "***"
+	}
+	return s.openRouterAPIKey[:10] + "..." + s.openRouterAPIKey[len(s.openRouterAPIKey)-4:]
 }

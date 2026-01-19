@@ -6,7 +6,7 @@
 [![Status](https://img.shields.io/badge/status-active-success)](https://github.com)
 [![AI-Powered](https://img.shields.io/badge/AI-OpenRouter-purple)](https://openrouter.ai)
 
-**Vibe Engineering Playbook** 是一个完整的 AI 驱动开发工作流系统，通过 **14 个 GitHub Actions 工作流**和 **4 个可复用 Actions**，实现从需求分析、代码生成、错误修复到部署监控的全自动化流程。系统支持前后端分离开发，自动管理功能分支，并提供完善的错误处理和监控机制。
+**Vibe Engineering Playbook** 是一个完整的 AI 驱动开发工作流系统，通过 **12 个 GitHub Actions 工作流**和 **2 个可复用 Actions**，实现从需求分析、代码生成、错误修复到部署监控的全自动化流程。系统支持前后端分离开发，自动管理功能分支，并提供完善的错误处理和监控机制。
 
 ---
 
@@ -14,9 +14,9 @@
 
 ### 🤖 AI Agent 工作流
 
-- **智能任务路由**: 自动分析 Issue 复杂度（简单/中等/复杂），路由到对应的 Agent
+- **统一 Agent 入口**: 通过 `/agent ui|spec|be|fe` 命令，自动生成 UI 规格、技术规格、后端代码、前端代码
 - **代码生成**: 支持前端（Next.js + TypeScript）和后端（Go + Gin）自动代码生成
-- **UI 设计规格生成**: 从产品需求自动生成 UI 设计规格文档
+- **规格文档生成**: 从产品需求自动生成 UI 设计规格和完整技术规格文档
 - **错误自动修复**: CI/CD 失败时自动分析并修复构建错误
 
 ### 🔄 自动化工作流
@@ -110,26 +110,23 @@ npm run dev
 
 ## 📖 工作流系统
 
-本项目包含 **14 个 GitHub Actions 工作流**和 **4 个可复用 Composite Actions**，实现完整的自动化开发流程。
+本项目包含 **12 个 GitHub Actions 工作流**和 **2 个可复用 Composite Actions**，实现完整的自动化开发流程。
 
 ### 工作流分类
 
-#### 🤖 AI Agent 工作流（4个）
+#### 🤖 核心 Agent 工作流（1个）
 
 | 工作流            | 功能                                       | 触发方式                    |
-| ----------------- | ------------------------------------------ | --------------------------- | --- | --------------- | --- | --- |
-| **Vibe Agent**    | 统一 Agent 入口，处理 UI/后端/前端代码生成 | `/agent ui                  | be  | fe`或`/agent-ui | be  | fe` |
-| **Simple Agent**  | 处理简单任务，直接编码                     | `/agent-simple` 或自动触发  |
-| **Medium Agent**  | 处理中等任务，先分析再开发                 | `/agent-medium` 或自动触发  |
-| **Complex Agent** | 拆分复杂任务为子 Issue                     | `/agent-complex` 或自动触发 |
+| ----------------- | ------------------------------------------ | --------------------------- |
+| **Vibe Agent**    | 统一 Agent 入口，处理 UI/Spec/后端/前端代码生成 | `/agent ui|spec|be|fe` 或 `/agent-ui|spec|be|fe` |
 
-#### 🔄 路由和管理工作流（3个）
+#### 🔄 Issue 管理工作流（3个）
 
 | 工作流                       | 功能                                                        | 触发方式             |
 | ---------------------------- | ----------------------------------------------------------- | -------------------- |
-| **Vibe Router**              | 自动分析 Issue 复杂度并路由                                 | Issue 创建时自动触发 |
 | **Issue Manager**            | 自动标签和欢迎消息                                          | Issue 创建时自动触发 |
 | **Parent-Child Issue Guard** | 管理父子 Issue 关系，防止父 Issue 在子 Issue 未完成时被关闭 | Issue 关闭时自动触发 |
+| **Update PRD Status**      | 自动更新 PRD Issue 状态表格 | Issue 关闭/重新打开时自动触发 |
 
 #### ⚡ 自动化工作流（3个）
 
@@ -137,37 +134,35 @@ npm run dev
 | -------------------------- | --------------------------- | ----------------------------- |
 | **Auto Trigger Frontend**  | 后端 PR 合并后触发前端      | PR 合并时自动触发             |
 | **Feature Branch Manager** | 管理功能分支                | `feature:xxx` 标签或命令      |
-| **Update PRD Status**      | 自动更新 PRD Issue 状态表格 | Issue 关闭/重新打开时自动触发 |
+| **Dependency Chain Trigger** | 依赖链自动触发下一个任务 | 子 Issue 关闭时自动触发 |
 
-#### 🔍 监控和错误处理（3个）
+#### 🔍 监控和错误处理（4个）
 
 | 工作流             | 功能                   | 触发方式           |
 | ------------------ | ---------------------- | ------------------ |
+| **Vibe Continuous** | 任务监控与自动迭代 | 每24小时自动运行     |
 | **Fix PR**         | 修复 PR 构建错误       | `/fix` 命令        |
-| **Vercel Monitor** | 监控 Vercel 部署状态   | 部署状态变化时触发 |
-| **Vibe Monitor**   | 监控任务状态，自动恢复 | 每小时自动运行     |
+| **Vercel Status Monitor** | 监控 Vercel 部署状态   | 部署状态变化时触发 |
+| **Check API Error Handling** | 检查 API 错误处理规范 | PR 包含后端代码变更时触发 |
 
 #### 📋 其他工作流（1个）
 
 | 工作流                 | 功能         | 触发方式                                        |
 | ---------------------- | ------------ | ----------------------------------------------- |
-| **Weekly Maintenance** | 每日仓库维护 | 每天凌晨 3:00（北京时间）自动运行，也可手动触发 |
+| **Daily Maintenance** | 每日仓库维护 | 每天凌晨 3:00（北京时间）自动运行，也可手动触发 |
 
 ### 常用命令
 
 | 命令                    | 说明                               | 适用场景                |
 | ----------------------- | ---------------------------------- | ----------------------- |
 | `/agent ui`             | 生成 UI 设计规格                   | 需要先设计 UI           |
-| `/agent be`             | 生成后端代码                       | 已有 UI Spec            |
-| `/agent fe`             | 生成前端代码                       | 已有 UI Spec 或后端 API |
-| `/agent be --spec #123` | 基于指定 Issue 的 UI Spec 生成后端 | 指定 UI Spec 来源       |
-| `/agent-simple`         | 简单任务 Agent                     | Bug 修复、样式调整      |
-| `/agent-medium`         | 中等任务 Agent                     | 新功能、多文件修改      |
-| `/agent-complex`        | 复杂任务 Agent                     | 大型功能、需要拆分      |
+| `/agent spec`           | 生成完整技术规格                   | 需要技术方案设计        |
+| `/agent be`             | 生成后端代码                       | 已有规格文档            |
+| `/agent fe`             | 生成前端代码                       | 已有规格文档或后端 API  |
+| `/agent be --spec #123` | 基于指定 Issue 的规格生成后端      | 指定规格来源            |
 | `/fix`                  | 修复构建错误                       | PR 构建失败             |
 | `/sync`                 | 同步 main 到功能分支               | 功能分支需要更新        |
 | `/merge-to-main`        | 创建合并 PR                        | 功能完成后合并          |
-| `/clean-stale`          | 清理超时任务                       | 任务卡住时              |
 
 ### 查看工作流运行状态
 
@@ -209,17 +204,15 @@ gh run view <run-id>
 ```
 vibe-engineering-playbook/
 ├── .github/
-│   ├── workflows/          # 14 个 GitHub Actions 工作流
+│   ├── workflows/          # 12 个 GitHub Actions 工作流
 │   │   ├── README.md      # 工作流详细文档
-│   │   ├── agent-*.yml     # AI Agent 工作流
-│   │   ├── vibe-*.yml      # Vibe 系列工作流
+│   │   ├── vibe-agent.yml  # 统一 Agent 入口
+│   │   ├── vibe-continuous.yml  # 任务监控与自动迭代
 │   │   └── ...
-│   ├── actions/            # 4 个可复用 Composite Actions
-│   │   ├── update-issue-status/  # Issue 状态标签管理
-│   │   ├── openrouter-api/       # OpenRouter API 客户端
+│   ├── actions/            # 2 个可复用 Composite Actions
 │   │   ├── load-prompt/          # Prompt 模板加载器
 │   │   └── context-discovery/    # 项目上下文发现
-│   ├── prompts/           # 9 个 AI Prompt 模板
+│   ├── prompts/           # AI Prompt 模板
 │   │   ├── agents/        # Agent Prompt 模板
 │   │   └── router/         # 路由 Prompt 模板
 │
@@ -266,18 +259,18 @@ vibe-engineering-playbook/
 
 ```mermaid
 graph LR
-    A[创建 Issue] --> B[Vibe Router 分析]
-    B --> C{复杂度判断}
-    C -->|简单| D[Simple Agent]
-    C -->|中等| E[Medium Agent]
-    C -->|复杂| F[Complex Agent 拆分]
-    D --> G[生成 PR]
-    E --> G
-    F --> H[创建子 Issue]
-    H --> E
-    G --> I[代码审查]
-    I --> J[合并 PR]
-    J --> K[自动部署]
+    A[创建 Issue] --> B[描述需求]
+    B --> C[/agent spec]
+    C --> D[生成技术规格]
+    D --> E[/agent be]
+    E --> F[生成后端代码 PR]
+    F --> G[代码审查]
+    G --> H[合并 PR]
+    H --> I[/agent fe]
+    I --> J[生成前端代码 PR]
+    J --> K[代码审查]
+    K --> L[合并 PR]
+    L --> M[自动部署]
 ```
 
 ### 1. 创建需求 Issue
@@ -301,15 +294,19 @@ graph LR
 - 前端使用 shadcn/ui 组件
 ```
 
-### 2. 自动路由和处理
+### 2. 使用 Agent 命令
 
-- **Vibe Router** 自动分析复杂度
-- 添加对应的标签（`complexity:medium`, `frontend`, `backend`）
-- 自动触发对应的 Agent
+在 Issue 评论中使用命令触发 AI Agent：
+
+```bash
+/agent spec  # 先生成技术规格
+/agent be    # 生成后端代码
+/agent fe    # 生成前端代码
+```
 
 ### 3. 代码生成和 PR
 
-- AI Agent 读取项目上下文
+- AI Agent 读取项目上下文和规格文档
 - 生成符合规范的代码
 - 自动创建分支和 PR
 - 在 Issue 中发布进度追踪
@@ -499,8 +496,8 @@ NEXT_PUBLIC_API_URL=https://your-backend.railway.app
 ### Agent 失败
 
 1. 查看 Actions 日志了解详细错误
-2. Error Handler 会自动分析并提供修复建议
-3. 根据建议修复后重试
+2. 在 Issue 中重新评论对应的 Agent 命令重试
+3. 如果持续失败，可能需要优化需求描述或规格文档
 
 ### 构建错误
 
@@ -510,7 +507,7 @@ NEXT_PUBLIC_API_URL=https://your-backend.railway.app
 
 ### 任务超时
 
-1. 使用 `/clean-stale` 清理超时任务
+1. `vibe-continuous.yml` 会每24小时自动检查并清理超时任务
 2. 查看 Actions 日志确认状态
 3. 使用对应的 Agent 命令重试
 
@@ -526,10 +523,9 @@ NEXT_PUBLIC_API_URL=https://your-backend.railway.app
 
 ## 📊 项目统计
 
-- **工作流数量**: 14 个
-- **可复用 Actions**: 4 个
-- **Prompt 模板**: 9 个
-- **AI Agent**: 4 个（统一入口 + 3 个复杂度分级）
+- **工作流数量**: 12 个
+- **可复用 Actions**: 2 个
+- **AI Agent**: 1 个统一入口（支持 UI/Spec/BE/FE 四种模式）
 - **自动化流程**: 10+
 - **支持平台**: GitHub, Vercel, Railway
 - **技术栈**: Go, Next.js, TypeScript, PostgreSQL, Redis
@@ -552,25 +548,27 @@ NEXT_PUBLIC_API_URL=https://your-backend.railway.app
 - ✅ **工作流和前端路由系统重构**：优化任务路由逻辑和前端代码生成流程
 - ✅ **每日维护工作流调整**：改为每天凌晨 3:00（北京时间）执行，支持手动触发
 
-### 2026-01-16
+### 2026-01-17
 
+- ✅ **工作流简化**：
+  - 禁用复杂度路由系统：`vibe-router.yml`, `agent-simple.yml`, `agent-medium.yml`, `agent-complex.yml`
+  - 统一使用 `vibe-agent.yml` 作为唯一 Agent 入口
+  - 当前保留 **12 个活跃 workflow**、**2 个 Actions**
 - ✅ **目录结构优化**：
-  - 新增 `update-issue-status` Action：统一 Issue 状态标签管理
   - 整合前端 prompt：合并 `fe/system-prompt.md` 到 `fe-codegen.md`
   - 清理冗余文件：删除未使用的 scripts、prompts 和 actions
-  - 当前保留 **14 个有效 workflow**、**4 个 Actions**、**9 个 Prompt 模板**
 - ✅ **工作流优化**：
-  - 新增可复用 Composite Actions：`openrouter-api`, `load-prompt`, `context-discovery`
+  - 新增可复用 Composite Actions：`load-prompt`, `context-discovery`
   - 重构多个工作流：从配置文件读取配置，添加重试机制
 
 ### 2026-01
 
-- ✅ 创建 `update-prd-status.yml` workflow，实现 Issue 状态自动同步
-- ✅ 创建 `parent-child-issue-guard.yml` workflow，管理父子 Issue 关系
+- ✅ 创建 `vibe-agent.yml`：统一 Agent 入口，支持 UI/Spec/BE/FE 四种模式
+- ✅ 创建 `update-prd-status.yml`：实现 Issue 状态自动同步
+- ✅ 创建 `parent-child-issue-guard.yml`：管理父子 Issue 关系
+- ✅ 创建 `vibe-continuous.yml`：任务监控与自动迭代引擎
 - ✅ 实现 AI 对话面板 (Chat Console) 前端功能
-- ✅ 统一 Agent 入口 (`vibe-agent.yml`)
 - ✅ 重写项目文档，包含完整的工作流系统说明
-- ✅ 更新所有日期信息为 2026 年
 
 ### 2024-2025
 

@@ -1,6 +1,12 @@
 /**
- * Dashboard 共享布局组件
- * Sidebar 只挂载一次，避免重复 API 调用
+ * Dashboard 共享布局组件 (已废弃 - 不要使用)
+ * 
+ * ⚠️ 警告：此组件包含全局导航侧边栏，不应在新页面中使用
+ * 
+ * 项目要求：不要在功能页面中添加侧边栏
+ * 请使用 SimplePage 或 MainLayout 组件代替
+ * 
+ * @deprecated 请使用不带侧边栏的布局组件
  */
 
 "use client";

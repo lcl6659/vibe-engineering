@@ -55,9 +55,12 @@ export function MemoryRail({
         search: searchQuery || undefined,
       });
       setInsights(response.data);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to fetch insights:", error);
-      toast.error("加载失败，请重试");
+      // Don't show error toast for 401 (Unauthorized) - user will be redirected to auth page
+      if (error?.status !== 401) {
+        toast.error("加载失败，请重试");
+      }
     } finally {
       setIsLoading(false);
     }

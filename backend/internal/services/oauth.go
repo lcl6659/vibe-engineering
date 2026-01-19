@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
@@ -26,6 +28,8 @@ func NewOAuthService(clientID, clientSecret, redirectURL string, log *zap.Logger
 		Scopes: []string{
 			youtube.YoutubeReadonlyScope,
 			youtube.YoutubeForceSslScope, // Required for Captions API access
+			"https://www.googleapis.com/auth/userinfo.email",
+			"https://www.googleapis.com/auth/userinfo.profile",
 		},
 		Endpoint: google.Endpoint,
 	}
@@ -99,4 +103,39 @@ func (s *OAuthService) TokenFromJSON(tokenJSON string) (*oauth2.Token, error) {
 // GetClient returns an HTTP client configured with the OAuth token.
 func (s *OAuthService) GetClient(ctx context.Context, token *oauth2.Token) *oauth2.Config {
 	return s.config
+}
+
+// GoogleUserInfo represents the user info from Google OAuth.
+type GoogleUserInfo struct {
+	ID            string `json:"id"`
+	Email         string `json:"email"`
+	VerifiedEmail bool   `json:"verified_email"`
+	Name          string `json:"name"`
+	GivenName     string `json:"given_name"`
+	FamilyName    string `json:"family_name"`
+	Picture       string `json:"picture"`
+	Locale        string `json:"locale"`
+}
+
+// GetUserInfo retrieves user information from Google using the access token.
+func (s *OAuthService) GetUserInfo(ctx context.Context, token *oauth2.Token) (*GoogleUserInfo, error) {
+	client := s.config.Client(ctx, token)
+	
+	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user info: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to get user info: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var userInfo GoogleUserInfo
+	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+		return nil, fmt.Errorf("failed to decode user info: %w", err)
+	}
+
+	return &userInfo, nil
 }

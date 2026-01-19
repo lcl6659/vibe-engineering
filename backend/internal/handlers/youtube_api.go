@@ -11,26 +11,30 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
+	"gorm.io/gorm"
 
 	"vibe-backend/internal/models"
+	"vibe-backend/internal/repository"
 	"vibe-backend/internal/services"
 )
 
 // YouTubeAPIHandler handles YouTube API endpoints.
 type YouTubeAPIHandler struct {
-	youtubeAPI   *services.YouTubeAPIService
+	youtubeAPI     *services.YouTubeAPIService
 	youtubeService *services.YouTubeService
-	oauthService *services.OAuthService
-	log          *zap.Logger
+	oauthService   *services.OAuthService
+	userRepo       repository.UserRepository
+	log            *zap.Logger
 }
 
 // NewYouTubeAPIHandler creates a new YouTubeAPIHandler.
-func NewYouTubeAPIHandler(youtubeAPI *services.YouTubeAPIService, youtubeService *services.YouTubeService, oauthService *services.OAuthService, log *zap.Logger) *YouTubeAPIHandler {
+func NewYouTubeAPIHandler(youtubeAPI *services.YouTubeAPIService, youtubeService *services.YouTubeService, oauthService *services.OAuthService, userRepo *repository.UserRepository, log *zap.Logger) *YouTubeAPIHandler {
 	return &YouTubeAPIHandler{
-		youtubeAPI:   youtubeAPI,
+		youtubeAPI:     youtubeAPI,
 		youtubeService: youtubeService,
-		oauthService: oauthService,
-		log:          log,
+		oauthService:   oauthService,
+		userRepo:       *userRepo,
+		log:            log,
 	}
 }
 
@@ -90,7 +94,60 @@ func (h *YouTubeAPIHandler) HandleCallback(c *gin.Context) {
 		return
 	}
 
-	// Convert token to JSON for storage
+	// Get user info from Google
+	userInfo, err := h.oauthService.GetUserInfo(c.Request.Context(), token)
+	if err != nil {
+		h.log.Error("Failed to get user info from Google",
+			zap.Error(err),
+		)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Code:    models.ErrorAuthFailed,
+			Message: "获取用户信息失败",
+		})
+		return
+	}
+
+	// Check if user exists
+	user, err := h.userRepo.GetByEmail(c.Request.Context(), strings.ToLower(userInfo.Email))
+	if err != nil && err != gorm.ErrRecordNotFound {
+		h.log.Error("Failed to query user",
+			zap.String("email", userInfo.Email),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Code:    models.ErrorAuthFailed,
+			Message: "用户查询失败",
+		})
+		return
+	}
+
+	// If user doesn't exist, create new user
+	if user == nil {
+		user = &models.User{
+			Email:    strings.ToLower(userInfo.Email),
+			Name:     userInfo.Name,
+			Password: "google-oauth-user", // Placeholder password for OAuth users
+		}
+
+		if err := h.userRepo.Create(c.Request.Context(), user); err != nil {
+			h.log.Error("Failed to create user",
+				zap.String("email", userInfo.Email),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Code:    models.ErrorAuthFailed,
+				Message: "用户创建失败",
+			})
+			return
+		}
+
+		h.log.Info("New user created via Google OAuth",
+			zap.Uint("user_id", user.ID),
+			zap.String("email", user.Email),
+		)
+	}
+
+	// Convert token to JSON for storage (for YouTube API access)
 	tokenJSON, err := h.oauthService.TokenToJSON(token)
 	if err != nil {
 		h.log.Error("Failed to serialize token",
@@ -103,13 +160,20 @@ func (h *YouTubeAPIHandler) HandleCallback(c *gin.Context) {
 		return
 	}
 
-	// Return token to client for storage
+	// Return both system API key and Google OAuth token
 	c.JSON(http.StatusOK, models.OAuthCallbackResponse{
 		AccessToken:  token.AccessToken,
 		RefreshToken: token.RefreshToken,
 		TokenType:    token.TokenType,
 		Expiry:       token.Expiry,
 		TokenJSON:    tokenJSON,
+		User: &models.UserResponse{
+			ID:        user.ID,
+			Email:     user.Email,
+			Name:      user.Name,
+			CreatedAt: user.CreatedAt,
+		},
+		APIKey: user.APIKey,
 	})
 }
 

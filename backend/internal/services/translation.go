@@ -23,6 +23,20 @@ type TranslationService struct {
 // NewTranslationService creates a new TranslationService.
 // Uses OpenRouter API with Gemini model for translation.
 func NewTranslationService(apiKey, model string, log *zap.Logger) *TranslationService {
+	// Validate API key on service initialization
+	if apiKey == "" {
+		log.Warn("⚠️  OpenRouter API 密钥未设置（翻译服务）",
+			zap.String("环境变量", "OPENROUTER_API_KEY"),
+			zap.String("影响功能", "翻译功能将无法使用"),
+		)
+	} else {
+		maskedKey := apiKey[:10] + "..." + apiKey[len(apiKey)-4:]
+		log.Info("✅ 翻译服务已初始化",
+			zap.String("model", model),
+			zap.String("api_key", maskedKey),
+		)
+	}
+	
 	return &TranslationService{
 		apiKey: apiKey,
 		model:  model,
@@ -239,6 +253,17 @@ func (s *TranslationService) callOpenRouter(ctx context.Context, request map[str
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		// Special handling for 401 authentication errors
+		if resp.StatusCode == http.StatusUnauthorized {
+			s.log.Error("❌ OpenRouter API 认证失败 - API密钥无效 (翻译服务)",
+				zap.Int("status_code", resp.StatusCode),
+				zap.String("response_body", string(body)),
+				zap.String("error_type", "AUTHENTICATION_FAILED"),
+				zap.String("解决方案", "请检查 OPENROUTER_API_KEY 环境变量，访问 https://openrouter.ai/ 获取有效密钥"),
+			)
+			return "", fmt.Errorf("OpenRouter API 认证失败（401）: %s - 请检查 OPENROUTER_API_KEY 是否有效", string(body))
+		}
+		
 		s.log.Error("OpenRouter API error",
 			zap.Int("status", resp.StatusCode),
 			zap.String("body", string(body)),

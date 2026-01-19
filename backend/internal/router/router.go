@@ -77,7 +77,7 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 	// YouTube Data API v3 handlers (OAuth + API endpoints)
 	oauthService := services.NewOAuthService(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL, log)
 	youtubeAPIService := services.NewYouTubeAPIService(cfg.YouTubeAPIKey, cache, oauthService, log)
-	youtubeAPIHandler := handlers.NewYouTubeAPIHandler(youtubeAPIService, youtubeService, oauthService, log)
+	youtubeAPIHandler := handlers.NewYouTubeAPIHandler(youtubeAPIService, youtubeService, oauthService, userRepo, log)
 
 	transcriptHandler := handlers.NewTranscriptHandler(transcriptService, log)
 

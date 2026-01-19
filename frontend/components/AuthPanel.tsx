@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { ShieldCheck, ExternalLink, Loader2 } from "lucide-react";
 import { youtubeApi } from "@/lib/api/endpoints";
@@ -8,6 +8,22 @@ import { toast } from "@/lib/utils/toast";
 
 export default function AuthPanel() {
   const [loading, setLoading] = useState(false);
+
+  // Clean up any corrupted auth data on mount
+  useEffect(() => {
+    try {
+      const authToken = localStorage.getItem('auth_token');
+      if (authToken) {
+        // Check if it was stored as JSON (incorrect format)
+        if (authToken.startsWith('{') || authToken.startsWith('[') || authToken.startsWith('"')) {
+          console.warn('Cleaning up corrupted auth_token');
+          localStorage.removeItem('auth_token');
+        }
+      }
+    } catch (e) {
+      // Ignore errors
+    }
+  }, []);
 
   const handleAuth = async () => {
     setLoading(true);
@@ -19,12 +35,30 @@ export default function AuthPanel() {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/a127609d-0110-4a4e-83ea-2be1242c90c3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthPanel.tsx:handleAuth:success',message:'getAuthUrl succeeded',data:{url},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,E'})}).catch(()=>{});
       // #endregion
+      if (!url) {
+        toast.error("OAuth 未配置。请检查后端环境变量 GOOGLE_CLIENT_ID 和 GOOGLE_CLIENT_SECRET");
+        setLoading(false);
+        return;
+      }
       window.location.href = url;
-    } catch (e) {
+    } catch (e: any) {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/a127609d-0110-4a4e-83ea-2be1242c90c3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthPanel.tsx:handleAuth:error',message:'getAuthUrl failed',data:{error:e instanceof Error ? e.message : String(e), errorName: e instanceof Error ? e.name : 'unknown'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,C,D'})}).catch(()=>{});
       // #endregion
-      toast.error("Failed to initialize authorization");
+      
+      // 显示更详细的错误信息
+      let errorMessage = "授权初始化失败";
+      if (e?.message) {
+        if (e.message.includes("OAuth 配置缺失")) {
+          errorMessage = "Google OAuth 未配置。请联系管理员配置 GOOGLE_CLIENT_ID 和 GOOGLE_CLIENT_SECRET";
+        } else if (e.message.includes("网络")) {
+          errorMessage = "网络连接失败。请检查后端服务是否正常运行";
+        } else {
+          errorMessage = e.message;
+        }
+      }
+      
+      toast.error(errorMessage);
       setLoading(false);
     }
   };
@@ -34,10 +68,6 @@ export default function AuthPanel() {
       <div className="h-20 w-20 rounded-3xl bg-primary/5 flex items-center justify-center mb-8">
         <ShieldCheck className="h-10 w-10 text-primary" />
       </div>
-      <h2 className="text-3xl font-bold tracking-tight mb-4">Google API Authorization</h2>
-      <p className="text-muted-foreground max-w-md mx-auto mb-10 leading-relaxed">
-        To access private playlists and higher-resolution data, please authorize VIBE to access your YouTube account via Google OAuth 2.0.
-      </p>
       <Button
         size="lg"
         onClick={handleAuth}
@@ -53,9 +83,6 @@ export default function AuthPanel() {
           </>
         )}
       </Button>
-      <p className="mt-6 text-xs text-muted-foreground">
-        We only request read-only access to your YouTube data.
-      </p>
     </div>
   );
 }

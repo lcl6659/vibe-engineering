@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -39,6 +40,20 @@ func NewYouTubeService(apiKey string, geminiModel string, log *zap.Logger) *YouT
 
 	// Get YouTube API key from environment
 	youtubeAPIKey := os.Getenv("YOUTUBE_API_KEY")
+
+	// Validate API key on service initialization
+	if apiKey == "" {
+		log.Warn("⚠️  OpenRouter API 密钥未设置（YouTube服务）",
+			zap.String("环境变量", "OPENROUTER_API_KEY"),
+			zap.String("影响功能", "视频分析功能将无法使用"),
+		)
+	} else {
+		maskedKey := apiKey[:10] + "..." + apiKey[len(apiKey)-4:]
+		log.Info("✅ YouTube分析服务已初始化",
+			zap.String("model", geminiModel),
+			zap.String("api_key", maskedKey),
+		)
+	}
 
 	return &YouTubeService{
 		openRouterAPIKey: apiKey,
@@ -169,6 +184,63 @@ func parseISO8601Duration(duration string) int {
 	}
 
 	return hours*3600 + minutes*60 + seconds
+}
+
+// GetVideoMetadataWithYtDlp fetches video metadata using yt-dlp (most reliable, no API key needed).
+func (s *YouTubeService) GetVideoMetadataWithYtDlp(ctx context.Context, videoID string) (*VideoMetadata, error) {
+	s.log.Info("Fetching video metadata using yt-dlp",
+		zap.String("video_id", videoID),
+	)
+
+	videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+	
+	cmd := exec.CommandContext(ctx,
+		"yt-dlp",
+		"--dump-json",
+		"--no-warnings",
+		"--skip-download",
+		"--no-playlist",
+		videoURL,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		s.log.Error("yt-dlp metadata extraction failed",
+			zap.String("video_id", videoID),
+			zap.Error(err),
+			zap.String("output", string(output)),
+		)
+		return nil, fmt.Errorf("yt-dlp metadata extraction failed: %w", err)
+	}
+
+	var metadata struct {
+		Title     string `json:"title"`
+		Uploader  string `json:"uploader"`
+		Duration  int    `json:"duration"`
+		Thumbnail string `json:"thumbnail"`
+	}
+
+	if err := json.Unmarshal(output, &metadata); err != nil {
+		s.log.Error("Failed to parse yt-dlp metadata",
+			zap.String("video_id", videoID),
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("failed to parse yt-dlp metadata: %w", err)
+	}
+
+	s.log.Info("Successfully fetched metadata using yt-dlp",
+		zap.String("video_id", videoID),
+		zap.String("title", metadata.Title),
+		zap.String("uploader", metadata.Uploader),
+	)
+
+	return &VideoMetadata{
+		VideoID:      videoID,
+		Title:        metadata.Title,
+		Author:       metadata.Uploader,
+		ThumbnailURL: metadata.Thumbnail,
+		Duration:     metadata.Duration,
+	}, nil
 }
 
 // VideoMetadata represents basic video information.
@@ -1767,6 +1839,8 @@ func (s *YouTubeService) callGemini(ctx context.Context, prompt string) (string,
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+s.openRouterAPIKey)
+	req.Header.Set("HTTP-Referer", "https://github.com/your-repo/vibe-engineering-playbook")
+	req.Header.Set("X-Title", "VIBE Engineering Playbook")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -1780,6 +1854,17 @@ func (s *YouTubeService) callGemini(ctx context.Context, prompt string) (string,
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		// Special handling for 401 authentication errors
+		if resp.StatusCode == http.StatusUnauthorized {
+			s.log.Error("❌ OpenRouter API 认证失败 - API密钥无效 (YouTube服务)",
+				zap.Int("status_code", resp.StatusCode),
+				zap.String("response_body", string(body)),
+				zap.String("error_type", "AUTHENTICATION_FAILED"),
+				zap.String("解决方案", "请检查 OPENROUTER_API_KEY 环境变量，访问 https://openrouter.ai/ 获取有效密钥"),
+			)
+			return "", fmt.Errorf("OpenRouter API 认证失败（401）: %s - 请检查 OPENROUTER_API_KEY 是否有效", string(body))
+		}
+		
 		s.log.Error("OpenRouter API error",
 			zap.Int("status", resp.StatusCode),
 			zap.String("response", string(body)),

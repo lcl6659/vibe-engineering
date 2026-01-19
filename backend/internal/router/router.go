@@ -86,10 +86,6 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 		// Parse routes
 		api.POST("/parse", parseHandler.Parse)
 
-		// Translation routes
-		api.POST("/translate", translationHandler.Translate)
-		api.GET("/translate/:id", translationHandler.GetTranslation)
-
 		// Analysis routes
 		analysis := api.Group("/analysis")
 		{
@@ -149,6 +145,10 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 
 			// Transcript extraction endpoint (yt-dlp based)
 			v1.POST("/transcript", transcriptHandler.GetTranscript)
+
+			// Translation routes
+			v1.POST("/translate", translationHandler.Translate)
+			v1.GET("/translate/:id", translationHandler.GetTranslation)
 
 			// InsightFlow routes
 			insights := v1.Group("/insights")

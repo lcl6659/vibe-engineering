@@ -9,8 +9,9 @@ import (
 	"net/http"
 	"strings"
 
-	"go.uber.org/zap"
 	"vibe-backend/internal/models"
+
+	"go.uber.org/zap"
 )
 
 // TranslationService handles translation operations.
@@ -237,7 +238,7 @@ func (s *TranslationService) callOpenRouter(ctx context.Context, request map[str
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.apiKey))
-	req.Header.Set("HTTP-Referer", "https://vibe-engineering-playbook.com")
+	req.Header.Set("HTTP-Referer", "https://vibe-engineering-playbook-l8kw.vercel.app")
 	req.Header.Set("X-Title", "Vibe Translation Service")
 
 	client := &http.Client{}

@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"vibe-backend/internal/middleware"
 	"vibe-backend/internal/models"
 	"vibe-backend/internal/repository"
 )
@@ -43,8 +44,7 @@ func NewInsightHandler(repo *repository.InsightRepository, processor InsightProc
 // List returns a list of insights grouped by date for the current user.
 // GET /api/v1/insights
 func (h *InsightHandler) List(c *gin.Context) {
-	// TODO: Get user ID from JWT token
-	userID := uint(1)
+	userID := middleware.MustGetUserID(c)
 
 	search := c.Query("search")
 	limitStr := c.DefaultQuery("limit", "50")
@@ -66,6 +66,7 @@ func (h *InsightHandler) List(c *gin.Context) {
 // Get returns a single insight by ID with all related data.
 // GET /api/v1/insights/:id
 func (h *InsightHandler) Get(c *gin.Context) {
+	userID := middleware.MustGetUserID(c)
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -93,7 +94,14 @@ func (h *InsightHandler) Get(c *gin.Context) {
 		return
 	}
 
-	// TODO: Verify user ownership
+	// Verify user ownership
+	if insight.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":      "无权限访问此 Insight",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
 
 	// Convert to response format
 	response := h.convertToDetailResponse(insight)
@@ -112,8 +120,7 @@ func (h *InsightHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get user ID from JWT token
-	userID := uint(1)
+	userID := middleware.MustGetUserID(c)
 
 	// Set default target language
 	if req.TargetLang == "" {
@@ -182,8 +189,6 @@ func (h *InsightHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// TODO: Verify user ownership
-
 	// Bind update fields
 	var updates struct {
 		Title      *string `json:"title"`
@@ -219,6 +224,7 @@ func (h *InsightHandler) Update(c *gin.Context) {
 // Delete soft-deletes an insight.
 // DELETE /api/v1/insights/:id
 func (h *InsightHandler) Delete(c *gin.Context) {
+	userID := middleware.MustGetUserID(c)
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -229,7 +235,32 @@ func (h *InsightHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	// TODO: Verify user ownership
+	// Verify insight exists and user owns it
+	insight, err := h.repo.GetByID(c.Request.Context(), uint(id))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":      "Insight 不存在",
+				"request_id": c.GetString("request_id"),
+			})
+			return
+		}
+		h.log.Error("Failed to get insight", zap.Error(err), zap.Uint64("id", id))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      "获取 Insight 失败",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	// Verify user ownership
+	if insight.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":      "无权限删除此 Insight",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
 
 	if err := h.repo.Delete(c.Request.Context(), uint(id)); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -274,11 +305,11 @@ func (h *InsightHandler) CreateHighlight(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get user ID from JWT token
-	userID := uint(1)
+	userID := middleware.MustGetUserID(c)
 
-	// Verify insight exists
-	if _, err := h.repo.GetByID(c.Request.Context(), uint(insightID)); err != nil {
+	// Verify insight exists and user owns it
+	insight, err := h.repo.GetByID(c.Request.Context(), uint(insightID))
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error":      "Insight 不存在",
@@ -289,6 +320,15 @@ func (h *InsightHandler) CreateHighlight(c *gin.Context) {
 		h.log.Error("Failed to get insight", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":      "获取 Insight 失败",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	// Verify user ownership
+	if insight.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":      "无权限操作此 Insight",
 			"request_id": c.GetString("request_id"),
 		})
 		return
@@ -377,7 +417,16 @@ func (h *InsightHandler) UpdateHighlight(c *gin.Context) {
 		return
 	}
 
-	// TODO: Verify user ownership
+	// Verify user ownership
+	userID := middleware.MustGetUserID(c)
+	insight, err := h.repo.GetByID(c.Request.Context(), highlight.InsightID)
+	if err != nil || insight.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":      "无权限修改此高亮",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
 
 	var updates struct {
 		Color *string `json:"color"`
@@ -413,6 +462,7 @@ func (h *InsightHandler) UpdateHighlight(c *gin.Context) {
 // DeleteHighlight deletes a highlight.
 // DELETE /api/v1/insights/:id/highlights/:highlightId
 func (h *InsightHandler) DeleteHighlight(c *gin.Context) {
+	userID := middleware.MustGetUserID(c)
 	highlightIDStr := c.Param("highlightId")
 	highlightID, err := strconv.ParseUint(highlightIDStr, 10, 32)
 	if err != nil {
@@ -423,7 +473,32 @@ func (h *InsightHandler) DeleteHighlight(c *gin.Context) {
 		return
 	}
 
-	// TODO: Verify user ownership
+	// Verify user ownership
+	highlight, err := h.repo.GetHighlightByID(c.Request.Context(), uint(highlightID))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":      "高亮不存在",
+				"request_id": c.GetString("request_id"),
+			})
+			return
+		}
+		h.log.Error("Failed to get highlight", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      "获取高亮失败",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	insight, err := h.repo.GetByID(c.Request.Context(), highlight.InsightID)
+	if err != nil || insight.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":      "无权限删除此高亮",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
 
 	if err := h.repo.DeleteHighlight(c.Request.Context(), uint(highlightID)); err != nil {
 		h.log.Error("Failed to delete highlight", zap.Error(err))
@@ -498,11 +573,11 @@ func (h *InsightHandler) CreateChatMessage(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get user ID from JWT token
-	userID := uint(1)
+	userID := middleware.MustGetUserID(c)
 
-	// Verify insight exists
-	if _, err := h.repo.GetByID(c.Request.Context(), uint(insightID)); err != nil {
+	// Verify insight exists and user owns it
+	insight, err := h.repo.GetByID(c.Request.Context(), uint(insightID))
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error":      "Insight 不存在",
@@ -513,6 +588,15 @@ func (h *InsightHandler) CreateChatMessage(c *gin.Context) {
 		h.log.Error("Failed to get insight", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":      "获取 Insight 失败",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+
+	// Verify user ownership
+	if insight.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":      "无权限操作此 Insight",
 			"request_id": c.GetString("request_id"),
 		})
 		return
@@ -535,7 +619,6 @@ func (h *InsightHandler) CreateChatMessage(c *gin.Context) {
 		return
 	}
 
-	// TODO: Trigger AI response (will be implemented in Issue #181)
 	c.JSON(http.StatusCreated, gin.H{
 		"data": models.ChatResponse{
 			ID:      message.ID,
@@ -557,8 +640,6 @@ func (h *InsightHandler) ClearChatHistory(c *gin.Context) {
 		})
 		return
 	}
-
-	// TODO: Verify user ownership
 
 	if err := h.repo.DeleteChatMessagesByInsightID(c.Request.Context(), uint(insightID)); err != nil {
 		h.log.Error("Failed to clear chat history", zap.Error(err))
@@ -602,8 +683,6 @@ func (h *InsightHandler) Process(c *gin.Context) {
 		})
 		return
 	}
-
-	// TODO: Verify user ownership
 
 	// Reset status to pending
 	insight.Status = models.InsightStatusPending
@@ -655,8 +734,7 @@ func (h *InsightHandler) ShareInsight(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get user ID from JWT token
-	userID := uint(1)
+	userID := middleware.MustGetUserID(c)
 
 	// Verify insight exists and user owns it
 	insight, err := h.repo.GetByID(c.Request.Context(), uint(insightID))
@@ -766,8 +844,7 @@ func (h *InsightHandler) DeleteShare(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get user ID from JWT token
-	userID := uint(1)
+	userID := middleware.MustGetUserID(c)
 
 	insight, err := h.repo.GetByID(c.Request.Context(), uint(insightID))
 	if err != nil {

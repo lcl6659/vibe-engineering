@@ -54,6 +54,7 @@ func main() {
 		if err == nil {
 			// Auto-migrate models
 			if err := db.DB.AutoMigrate(
+				&models.User{},
 				&models.Pomodoro{},
 				&models.VideoAnalysis{},
 				&models.Chapter{},

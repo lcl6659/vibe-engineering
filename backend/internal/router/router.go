@@ -64,6 +64,10 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 	translationService := services.NewTranslationService(cfg.OpenRouterAPIKey, cfg.GeminiModel, log)
 	translationHandler := handlers.NewTranslationHandler(translationRepo, translationService, transcriptService, log)
 
+	// User authentication handlers
+	userRepo := repository.NewUserRepository(db.DB)
+	userHandler := handlers.NewUserHandler(userRepo, log)
+
 	// InsightFlow handlers
 	insightRepo := repository.NewInsightRepository(db.DB)
 	insightProcessor := services.NewInsightProcessor(insightRepo, youtubeService, log)
@@ -85,6 +89,21 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 	// API routes
 	api := r.Group("/api")
 	{
+		// Auth routes (no authentication required)
+		auth := api.Group("/v1/auth")
+		{
+			auth.POST("/register", userHandler.Register)
+			auth.POST("/login", userHandler.Login)
+			
+			// Protected auth routes
+			authProtected := auth.Group("")
+			authProtected.Use(middleware.Auth(userRepo, log))
+			{
+				authProtected.GET("/profile", userHandler.GetProfile)
+				authProtected.POST("/regenerate-key", userHandler.RegenerateAPIKey)
+			}
+		}
+
 		// Parse routes
 		api.POST("/parse", parseHandler.Parse)
 
@@ -152,8 +171,9 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 			v1.POST("/translate", translationHandler.Translate)
 			v1.GET("/translate/:id", translationHandler.GetTranslation)
 
-			// InsightFlow routes
+			// InsightFlow routes (protected by authentication)
 			insights := v1.Group("/insights")
+			insights.Use(middleware.Auth(userRepo, log))
 			{
 				insights.GET("", insightHandler.List)
 				insights.POST("", insightHandler.Create)

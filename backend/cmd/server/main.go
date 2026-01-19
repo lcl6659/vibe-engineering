@@ -62,6 +62,8 @@ func main() {
 				&models.Insight{},
 				&models.Highlight{},
 				&models.ChatMessage{},
+				&models.Translation{},
+				&models.DualSubtitle{},
 			); err != nil {
 				log.Error("Failed to auto-migrate database", zap.Error(err))
 				db.Close()

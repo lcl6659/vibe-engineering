@@ -3,7 +3,7 @@
  * Handles all room-related API calls
  */
 
-import { request } from "./client";
+import { apiClient } from "./client";
 import type {
   JoinRoomRequest,
   JoinRoomResponse,
@@ -24,7 +24,7 @@ export const roomApi = {
    * Join a video room
    */
   async join(roomId: string): Promise<JoinRoomResponse> {
-    const data = await request<JoinRoomResponse>("/room/join", {
+    const data = await apiClient.request<JoinRoomResponse>("/room/join", {
       method: "POST",
       body: { roomId } as JoinRoomRequest,
     });
@@ -35,7 +35,7 @@ export const roomApi = {
    * Leave a video room
    */
   async leave(roomId: string, userId: string): Promise<LeaveRoomResponse> {
-    const data = await request<LeaveRoomResponse>("/room/leave", {
+    const data = await apiClient.request<LeaveRoomResponse>("/room/leave", {
       method: "POST",
       body: { roomId, userId } as LeaveRoomRequest,
     });
@@ -46,7 +46,7 @@ export const roomApi = {
    * Get room status
    */
   async getStatus(roomId: string): Promise<RoomStatusResponse> {
-    const data = await request<RoomStatusResponse>("/room/status", {
+    const data = await apiClient.request<RoomStatusResponse>("/room/status", {
       method: "GET",
       params: { roomId },
     });
@@ -61,7 +61,7 @@ export const roomApi = {
     userId: string,
     sdp: string
   ): Promise<MediaOfferResponse> {
-    const data = await request<MediaOfferResponse>("/media/offer", {
+    const data = await apiClient.request<MediaOfferResponse>("/media/offer", {
       method: "POST",
       body: { roomId, userId, sdp } as MediaOfferRequest,
     });
@@ -76,7 +76,7 @@ export const roomApi = {
     userId: string,
     candidate: string
   ): Promise<ICECandidateResponse> {
-    const data = await request<ICECandidateResponse>("/media/iceCandidate", {
+    const data = await apiClient.request<ICECandidateResponse>("/media/iceCandidate", {
       method: "POST",
       body: { roomId, userId, candidate } as ICECandidateRequest,
     });

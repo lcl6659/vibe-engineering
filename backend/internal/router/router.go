@@ -47,6 +47,10 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 	parserService := services.NewParserService(log)
 	parseHandler := handlers.NewParseHandler(parserService, log)
 
+	// Room handlers (video conference)
+	roomRepo := repository.NewRoomRepository(db.DB)
+	roomHandler := handlers.NewRoomHandler(roomRepo, log)
+
 	// Analysis handlers
 	analysisRepo := repository.NewAnalysisRepository(db.DB)
 	analysisHandler := handlers.NewAnalysisHandler(analysisRepo, log)
@@ -106,6 +110,22 @@ func New(cfg *config.Config, db *database.PostgresDB, cache *cache.RedisCache, l
 
 		// Parse routes
 		api.POST("/parse", parseHandler.Parse)
+
+		// Room routes (video conference)
+		room := api.Group("/room")
+		{
+			room.POST("/join", roomHandler.JoinRoom)
+			room.POST("/leave", roomHandler.LeaveRoom)
+			room.GET("/status", roomHandler.GetRoomStatus)
+		}
+
+		// Media routes (WebRTC signaling)
+		media := api.Group("/media")
+		{
+			media.POST("/offer", roomHandler.SendMediaOffer)
+			media.POST("/iceCandidate", roomHandler.SendICECandidate)
+			media.GET("/iceCandidates", roomHandler.GetICECandidates) // Optional helper endpoint
+		}
 
 		// Analysis routes
 		analysis := api.Group("/analysis")
